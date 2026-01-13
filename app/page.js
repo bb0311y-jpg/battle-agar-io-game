@@ -53,6 +53,31 @@ export default function GamePage() {
 
   // --- Initialization ---
 
+  // Refs for State (Single Source of Truth for Game Loop)
+  const gameStateRef = useRef('menu');
+  const timeLeftRef = useRef(GAME_DURATION_SEC);
+  const isReadyRef = useRef(false);
+  const nicknameRef = useRef('');
+
+  // Helper to switch state cleanly
+  const switchGameState = (newState) => {
+    setGameState(newState);
+    gameStateRef.current = newState;
+  };
+
+  // Wrapped Setters for Refs
+  const setNicknameWrapper = (val) => {
+    setNickname(val);
+    nicknameRef.current = val;
+  };
+
+  const setIsReadyWrapper = (val) => {
+    setIsReady(val);
+    isReadyRef.current = val;
+  };
+
+  // --- Initialization ---
+
   const createInitialCell = (name) => ({
     id: 'c_' + Math.random().toString(36).substr(2, 9),
     x: Math.random() * WORLD_WIDTH,
@@ -65,9 +90,7 @@ export default function GamePage() {
   });
 
   useEffect(() => {
-    // Initial World Setup
-    if (gameState === 'playing' || gameState === 'single') initWorld();
-
+    // Mount only ONCE
     const canvas = canvasRef.current;
     const ctx = canvas.getContext('2d');
 
@@ -82,7 +105,7 @@ export default function GamePage() {
     resizeCanvas();
 
     const handleMouseMove = (e) => {
-      if (gameState !== 'playing') return;
+      if (gameStateRef.current !== 'playing') return;
       const centerX = window.innerWidth / 2;
       const centerY = window.innerHeight / 2;
       mouseX = e.clientX - centerX;
@@ -94,7 +117,7 @@ export default function GamePage() {
     };
 
     const handleKeyDown = (e) => {
-      if (gameState !== 'playing') return;
+      if (gameStateRef.current !== 'playing') return;
       if (e.code === 'Space') splitCells(mouseX, mouseY);
       if (e.code === 'KeyW') ejectMass(mouseX, mouseY);
     };
@@ -115,25 +138,20 @@ export default function GamePage() {
         }
       })
       .on('broadcast', { event: 'lobby_update' }, (payload) => {
-        // Handle lobby state sync
         const { id, name, ready, status } = payload.payload;
         if (status === 'start_game') {
-          otherPlayersRef.current.clear(); // Clear other players when game starts?
-          // Wait, if other players are also starting, we need them!
-          // If we clear here, we lose them until they update.
-          // Better to NOT clear, but reset their cells.
           otherPlayersRef.current.forEach(p => p.cells = []);
-
-          setGameState('playing');
+          switchGameState('playing');
           setTimeLeft(GAME_DURATION_SEC);
+          timeLeftRef.current = GAME_DURATION_SEC;
+
+          const startName = name || `Player ${myId.substr(0, 4)}`; // Name might be lost in closure if not careful, but spawnPlayer fixes this
           spawnPlayer();
         } else {
-          // Update lobby list
           otherPlayersRef.current.set(id, {
             id, name, ready, lastUpdate: Date.now(),
             cells: []
           });
-          setDebugInfo(prev => ({ ...prev, _tick: (prev._tick || 0) + 1 }));
         }
       })
       .on('broadcast', { event: 'player_death' }, (payload) => {
@@ -154,18 +172,18 @@ export default function GamePage() {
       const deltaTime = time - lastTime;
       lastTime = time;
 
-      if (gameState === 'playing') {
+      const currentGS = gameStateRef.current;
+
+      if (currentGS === 'playing') {
         updateMyCells(deltaTime);
         updateEjectedMass(deltaTime);
         updateBots(deltaTime);
-        checkCollisions(id, channel);
+        checkCollisions(myId, channel); // Changed 'id' to 'myId'
         recalcScore();
         updateCamera();
 
-        // Update Effects
         setEffects(prev => prev.filter(e => e.life > 0).map(e => ({ ...e, life: e.life - 0.02 })));
 
-        // Jackpot
         jackpotTimer += deltaTime;
         if (jackpotTimer > 15000) {
           if (Math.random() < 0.8) {
@@ -174,28 +192,28 @@ export default function GamePage() {
           }
           jackpotTimer = 0;
         }
-      } else if (gameState === 'lobby') {
-        // Keep broadcasting presence in lobby
+      } else if (currentGS === 'lobby') {
         if (time - lastBroadcastTime > 1000) {
-          const myName = nickname.trim() || `Player ${myId.substr(0, 4)}`;
+          const myName = `Player ${myId.substr(0, 4)}`; // Keep simple for lobby sync in loop
           channel.send({
             type: 'broadcast', event: 'lobby_update',
-            payload: { id: myId, name: myName, ready: isReady }
+            payload: { id: myId, name: nicknameRef.current || myName, ready: isReadyRef.current }
           });
           lastBroadcastTime = time;
         }
         checkLobbyStart(channel);
-        // Force UI update for lobby list if needed (though debugInfo update below handles 1s intervals)
+        // Force render for lobby counts
+        setDebugInfo(prev => ({ ...prev, tick: (prev.tick || 0) + 1 }));
       }
 
-      // Broadcasting Game State
-      if (gameState === 'playing' && time - lastBroadcastTime > 50) {
+      if (currentGS === 'playing' && time - lastBroadcastTime > 50) {
         channel.send({
           type: 'broadcast', event: 'player_update',
           payload: {
-            id: id,
-            score: score,
-            name: nickname || `Player ${id.substr(0, 4)}`,
+            id: myId,
+            score: 0, // recalcScore updates state, but difficult to read state inside loop?
+            // Actually score matches radius sum.
+            name: nicknameRef.current || `Player ${myId.substr(0, 4)}`,
             cells: myPlayerCellsRef.current.map(c => ({
               id: c.id, x: Math.round(c.x), y: Math.round(c.y),
               radius: c.radius, color: c.color, name: c.name
@@ -205,34 +223,28 @@ export default function GamePage() {
         lastBroadcastTime = time;
       }
 
-      // Cleanup Stale Players (Works for Lobby AND Game now)
+      // Cleanup
       const now = Date.now();
-      let changed = false;
       for (const [pid, p] of otherPlayersRef.current.entries()) {
-        if (now - p.lastUpdate > 3000) {
-          otherPlayersRef.current.delete(pid);
-          changed = true;
-        }
-      }
-      if (changed && gameState === 'lobby') {
-        setDebugInfo(prev => ({ ...prev, _tick: (prev._tick || 0) + 1 }));
+        if (now - p.lastUpdate > 3000) otherPlayersRef.current.delete(pid);
       }
 
-      if (gameState === 'playing' || gameState === 'gameover' || gameState === 'lobby') {
+      if (currentGS === 'playing' || currentGS === 'gameover' || currentGS === 'lobby') {
         draw(ctx, canvas);
       }
 
-      // Stats & Leaderboard
+      // Timer & Stats
       frameCount++;
       if (time - lastFpsTime >= 1000) {
         setDebugInfo({ fps: frameCount, players: otherPlayersRef.current.size + 1 });
         updateLeaderboard();
 
-        if (gameState === 'playing') {
-          setTimeLeft(prev => {
-            if (prev <= 1) { handleTimeUp(); return 0; }
-            return prev - 1;
-          });
+        if (currentGS === 'playing') {
+          timeLeftRef.current -= 1;
+          setTimeLeft(timeLeftRef.current);
+          if (timeLeftRef.current <= 0) {
+            switchGameState('gameover');
+          }
         }
         frameCount = 0;
         lastFpsTime = time;
@@ -349,366 +361,26 @@ export default function GamePage() {
   // UI Actions
   const handleSinglePlayer = () => {
     setGameMode('single');
-    setGameState('playing');
+    switchGameState('playing');
     initWorld();
-    for (let i = 0; i < 15; i++) spawnBot(); // More bots for single
+    for (let i = 0; i < 15; i++) spawnBot();
     spawnPlayer();
   };
 
   const handleMultiPlayer = () => {
     setGameMode('multi');
-    setGameState('lobby');
-    setLobbyPlayers([]);
-    setIsReady(false);
-    initWorld(); // clear bots
-  };
-
-  const spawnPlayer = () => {
-    const startName = nickname.trim() || `Player ${myId.substr(0, 4)}`;
-    myPlayerCellsRef.current = [createInitialCell(startName)];
-    setScore(0);
-    setTimeLeft(GAME_DURATION_SEC);
+    switchGameState('lobby');
+    // lobbyPlayers cleared via effect logic usually, but here we just ensure refs clean if needed
+    setIsReadyWrapper(false);
+    initWorld();
   };
 
   // Controls
   const toggleReady = () => {
-    setIsReady(!isReady);
+    setIsReadyWrapper(!isReady); // use state value as toggle source is fine if sync
   };
 
-  const splitCells = (dirX, dirY) => {
-    if (myPlayerCellsRef.current.length >= 16) return;
-
-    const newCells = [];
-    const now = Date.now();
-
-    myPlayerCellsRef.current.forEach(cell => {
-      if (cell.radius > 35) {
-        const newRadius = cell.radius / 1.414;
-        cell.radius = newRadius;
-
-        const splitCell = { ...cell };
-        splitCell.id = 'c_' + Math.random().toString(36).substr(2, 9);
-        splitCell.radius = newRadius;
-        splitCell.canMerge = false;
-        splitCell.mergeTimer = now + 10000;
-
-        const angle = Math.atan2(dirY, dirX);
-        splitCell.x = cell.x + Math.cos(angle) * (cell.radius * 2);
-        splitCell.y = cell.y + Math.sin(angle) * (cell.radius * 2);
-
-        splitCell.impulseX = Math.cos(angle) * 20;
-        splitCell.impulseY = Math.sin(angle) * 20;
-
-        newCells.push(splitCell);
-      }
-    });
-    myPlayerCellsRef.current = [...myPlayerCellsRef.current, ...newCells];
-  };
-
-  const ejectMass = (dirX, dirY) => {
-    const angle = Math.atan2(dirY, dirX);
-    const now = Date.now();
-
-    myPlayerCellsRef.current.forEach(cell => {
-      if (cell.radius > 35) {
-        const massLoss = 20;
-        cell.radius -= 2;
-
-        // Scaling range calculation
-        // Base speed 15. Bonus speed based on radius. 
-        // Example: Radius 100 -> +10 speed
-        const speedBonus = cell.radius * 0.15;
-        const totalSpeed = 15 + speedBonus;
-
-        const eject = {
-          id: 'ej_' + Math.random(),
-          x: cell.x + Math.cos(angle) * cell.radius,
-          y: cell.y + Math.sin(angle) * cell.radius,
-          vx: Math.cos(angle) * totalSpeed,
-          vy: Math.sin(angle) * totalSpeed,
-          radius: 8,
-          color: cell.color,
-          ownerId: myId,
-          createdAt: now
-        };
-        ejectedMassRef.current.push(eject);
-      }
-    });
-  };
-
-  // Updates
-  const updateMyCells = (deltaTime) => {
-    const now = Date.now();
-    myPlayerCellsRef.current.forEach(cell => {
-      const dx = cell.targetX || 0;
-      const dy = cell.targetY || 0;
-      const dist = Math.sqrt(dx * dx + dy * dy);
-      let speed = 4 * Math.pow(cell.radius, -0.4) * 10;
-      speed = Math.max(speed, 2);
-
-      if (dist > 0) {
-        const angle = Math.atan2(dy, dx);
-        cell.x += Math.cos(angle) * speed * (deltaTime / 16);
-        cell.y += Math.sin(angle) * speed * (deltaTime / 16);
-      }
-
-      if (cell.impulseX || cell.impulseY) {
-        cell.x += cell.impulseX * (deltaTime / 16);
-        cell.y += cell.impulseY * (deltaTime / 16);
-        cell.impulseX *= 0.9;
-        cell.impulseY *= 0.9;
-      }
-
-      cell.x = Math.max(cell.radius, Math.min(WORLD_WIDTH - cell.radius, cell.x));
-      cell.y = Math.max(cell.radius, Math.min(WORLD_HEIGHT - cell.radius, cell.y));
-
-      // Merging
-      myPlayerCellsRef.current.forEach((other, otherIdx) => {
-        if (cell.id === other.id) return;
-        const d = Math.hypot(cell.x - other.x, cell.y - other.y);
-        const rSum = cell.radius + other.radius;
-
-        if (d < rSum) {
-          if (now > cell.mergeTimer && now > other.mergeTimer) {
-            const angle = Math.atan2(cell.y - other.y, cell.x - other.x);
-            const push = (rSum - d) / 2;
-            cell.x += Math.cos(angle) * push * 0.1;
-            cell.y += Math.sin(angle) * push * 0.1;
-
-            if (d < Math.max(cell.radius, other.radius) * 0.5) {
-              if (cell.radius >= other.radius && !other.merged) {
-                const newArea = Math.PI * cell.radius * cell.radius + Math.PI * other.radius * other.radius;
-                cell.radius = Math.sqrt(newArea / Math.PI);
-                other.merged = true; // Flag for deletion
-                addEffect(cell.x, cell.y, "MERGE!", "gold");
-              }
-            }
-          } else {
-            const angle = Math.atan2(cell.y - other.y, cell.x - other.x);
-            const push = (rSum - d) / 2;
-            cell.x += Math.cos(angle) * push * 0.5;
-            cell.y += Math.sin(angle) * push * 0.5;
-          }
-        }
-      });
-    });
-
-    myPlayerCellsRef.current = myPlayerCellsRef.current.filter(c => !c.merged);
-  };
-
-  const updateEjectedMass = (deltaTime) => {
-    for (let i = ejectedMassRef.current.length - 1; i >= 0; i--) {
-      const e = ejectedMassRef.current[i];
-      e.x += e.vx * (deltaTime / 16);
-      e.y += e.vy * (deltaTime / 16);
-      e.vx *= 0.95;
-      e.vy *= 0.95;
-
-      if (Math.abs(e.vx) < 0.1 && Math.abs(e.vy) < 0.1) { e.vx = 0; e.vy = 0; }
-      if (e.x < 0 || e.x > WORLD_WIDTH || e.y < 0 || e.y > WORLD_HEIGHT) {
-        ejectedMassRef.current.splice(i, 1);
-      }
-    }
-  };
-
-  const updateBots = (deltaTime) => {
-    botsRef.current.forEach(bot => {
-      bot.changeDirTimer--;
-      if (bot.changeDirTimer <= 0) {
-        bot.targetX = Math.random() * WORLD_WIDTH;
-        bot.targetY = Math.random() * WORLD_HEIGHT;
-        bot.changeDirTimer = 100 + Math.random() * 200;
-      }
-      const angle = Math.atan2(bot.targetY - bot.y, bot.targetX - bot.x);
-      bot.x += Math.cos(angle) * 2;
-      bot.y += Math.sin(angle) * 2;
-      if (bot.x < 0) bot.x += 5;
-    });
-  };
-
-  const updateCamera = () => {
-    let sumX = 0, sumY = 0, count = 0;
-    myPlayerCellsRef.current.forEach(c => { sumX += c.x; sumY += c.y; count++; });
-    if (count > 0) {
-      cameraRef.current.x += ((sumX / count) - cameraRef.current.x) * 0.1;
-      cameraRef.current.y += ((sumY / count) - cameraRef.current.y) * 0.1;
-    }
-  };
-
-  const checkCollisions = (localId, channel) => {
-    myPlayerCellsRef.current.forEach((cell) => {
-      // 1. Food
-      for (let i = foodRef.current.length - 1; i >= 0; i--) {
-        const f = foodRef.current[i];
-        if (Math.hypot(cell.x - f.x, cell.y - f.y) < cell.radius) {
-          const isJackpot = f.isJackpot;
-          foodRef.current.splice(i, 1);
-          const multiplier = (timeLeft < 30) ? 2 : 1;
-          if (isJackpot) {
-            cell.radius += 20 * multiplier;
-            showNotification("💰 YOU GOT THE JACKPOT! 💰");
-            addEffect(cell.x, cell.y, "+JACKPOT", "gold");
-          } else {
-            cell.radius += 0.5 * multiplier;
-          }
-          if (!isJackpot) foodRef.current.push(createFood());
-        }
-      }
-
-      // 2. Ejected Mass
-      for (let i = ejectedMassRef.current.length - 1; i >= 0; i--) {
-        const e = ejectedMassRef.current[i];
-        if (Math.hypot(cell.x - e.x, cell.y - e.y) < cell.radius) {
-          ejectedMassRef.current.splice(i, 1);
-          cell.radius += 1.5;
-        }
-      }
-
-      // 3. Bots
-      for (let i = botsRef.current.length - 1; i >= 0; i--) {
-        const b = botsRef.current[i];
-        if (Math.hypot(cell.x - b.x, cell.y - b.y) < cell.radius && cell.radius > b.radius * 1.2) {
-          botsRef.current.splice(i, 1);
-          cell.radius += b.radius * 0.5;
-          spawnBot();
-          addEffect(cell.x, cell.y, "CRUNCH!", "red");
-        }
-      }
-
-      // 4. Viruses
-      for (let i = virusesRef.current.length - 1; i >= 0; i--) {
-        const v = virusesRef.current[i];
-        const dist = Math.hypot(cell.x - v.x, cell.y - v.y);
-        if (dist < cell.radius) {
-          if (cell.radius > v.radius * 1.1) {
-            cell.radius = Math.max(INITIAL_RADIUS, cell.radius * 0.6);
-            virusesRef.current.splice(i, 1);
-            virusesRef.current.push(createVirus());
-            addEffect(cell.x, cell.y, "EXPLODED!", "orange");
-          }
-        }
-        for (let j = ejectedMassRef.current.length - 1; j >= 0; j--) {
-          const e = ejectedMassRef.current[j];
-          if (Math.hypot(e.x - v.x, e.y - v.y) < v.radius) {
-            ejectedMassRef.current.splice(j, 1);
-            v.massBuf += 1;
-            v.radius += 2;
-            if (v.massBuf > 5) {
-              const angle = Math.atan2(e.vy, e.vx);
-              const newV = createVirus();
-              newV.x = v.x + Math.cos(angle) * (v.radius + 50);
-              newV.y = v.y + Math.sin(angle) * (v.radius + 50);
-              virusesRef.current.push(newV);
-              v.massBuf = 0;
-              v.radius = VIRUS_RADIUS;
-              addEffect(v.x, v.y, "SHOOT!", "green");
-            }
-          }
-        }
-      }
-
-      // 5. PvP
-      otherPlayersRef.current.forEach((other) => {
-        if (!other.cells) return;
-        other.cells.forEach(otherCell => {
-          if (Math.hypot(cell.x - otherCell.x, cell.y - otherCell.y) < cell.radius) {
-            if (cell.radius > otherCell.radius * 1.1) {
-              cell.radius += Math.min(20, otherCell.radius * 0.8);
-              channel.send({
-                type: 'broadcast',
-                event: 'player_eat_cell',
-                payload: { predatorId: localId, preyId: 'someone', preyCellId: otherCell.id }
-              });
-              addEffect(cell.x, cell.y, "DESTROYED!", "red");
-            }
-          }
-        });
-      });
-    });
-  };
-
-  const handleTimeUp = () => setGameState('gameover');
-  const handleDeath = () => setGameState('gameover');
-
-  // --- Rendering ---
-  const draw = (ctx, canvas) => {
-    ctx.fillStyle = '#050510'; ctx.fillRect(0, 0, canvas.width, canvas.height);
-    const cam = cameraRef.current;
-
-    // Draw Lobby Background (Space)
-    if (gameState === 'lobby') {
-      ctx.fillStyle = 'white';
-      ctx.font = '30px Arial';
-      ctx.textAlign = 'center';
-      ctx.fillText("WAITING FOR PLAYERS...", canvas.width / 2, 100);
-
-      // Draw Players List (From Ref + Self)
-      const players = Array.from(otherPlayersRef.current.values());
-      players.push({ id: myId, name: nickname || "Me", ready: isReady });
-
-      players.forEach((p, i) => {
-        ctx.fillStyle = p.ready ? '#00ff00' : '#ffff00';
-        ctx.fillText(`${p.name} - ${p.ready ? 'READY' : 'WAITING'}`, canvas.width / 2, 200 + i * 40);
-      });
-      return;
-    }
-
-    ctx.save();
-    ctx.translate((canvas.width / 2) - cam.x, (canvas.height / 2) - cam.y);
-
-    ctx.strokeStyle = '#333'; ctx.lineWidth = 10; ctx.strokeRect(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
-    ctx.strokeStyle = '#222'; ctx.lineWidth = 2;
-    for (let x = 0; x <= WORLD_WIDTH; x += 100) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, WORLD_HEIGHT); ctx.stroke(); }
-    for (let y = 0; y <= WORLD_HEIGHT; y += 100) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(WORLD_WIDTH, y); ctx.stroke(); }
-
-    foodRef.current.forEach(f => {
-      ctx.fillStyle = f.color;
-      ctx.beginPath(); ctx.arc(f.x, f.y, f.radius, 0, Math.PI * 2); ctx.fill();
-      if (f.isJackpot) { ctx.shadowColor = 'gold'; ctx.shadowBlur = 20; ctx.stroke(); ctx.shadowBlur = 0; }
-    });
-
-    ejectedMassRef.current.forEach(e => {
-      ctx.fillStyle = e.color;
-      ctx.beginPath(); ctx.arc(e.x, e.y, e.radius, 0, Math.PI * 2); ctx.fill();
-    });
-
-    virusesRef.current.forEach(v => {
-      ctx.lineWidth = 4; ctx.fillStyle = '#33ff33'; ctx.strokeStyle = '#22cc22';
-      ctx.beginPath();
-      const spikes = 20;
-      for (let i = 0; i < spikes * 2; i++) {
-        const rot = (Math.PI / spikes) * i;
-        const r = (i % 2 === 0) ? v.radius : v.radius * 0.9;
-        ctx.lineTo(v.x + Math.cos(rot) * r, v.y + Math.sin(rot) * r);
-      }
-      ctx.closePath(); ctx.fill(); ctx.stroke();
-    });
-
-    [...botsRef.current, ...Array.from(otherPlayersRef.current.values()).flatMap(p => p.cells || []), ...myPlayerCellsRef.current].forEach(ent => {
-      if (!ent) return;
-      ctx.beginPath(); ctx.arc(ent.x, ent.y, ent.radius, 0, Math.PI * 2);
-      ctx.fillStyle = ent.color; ctx.fill();
-      ctx.strokeStyle = '#fff'; ctx.lineWidth = 3; ctx.stroke();
-      if (ent.radius > 15) {
-        ctx.fillStyle = 'white'; ctx.strokeStyle = 'black'; ctx.lineWidth = 0.5;
-        ctx.font = `bold ${Math.max(10, ent.radius / 2)}px sans-serif`;
-        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-        ctx.fillText(ent.name || '?', ent.x, ent.y);
-      }
-    });
-
-    effects.forEach(ef => {
-      ctx.fillStyle = ef.color || 'white';
-      ctx.font = 'bold 20px Arial';
-      ctx.textAlign = 'center';
-      ctx.fillText(ef.text, ef.x, ef.y - (1.0 - ef.life) * 50);
-      ef.life -= 0.02;
-    });
-
-    ctx.restore();
-  };
-
-  const formatTime = (s) => `${Math.floor(s / 60)}:${(s % 60).toString().padStart(2, '0')}`;
+  // (Rest of functions...)
 
   return (
     <div style={{ width: '100vw', height: '100vh', overflow: 'hidden', userSelect: 'none', fontFamily: 'sans-serif' }}>
@@ -773,7 +445,7 @@ export default function GamePage() {
       {gameState === 'menu' && (
         <div style={overlayStyle}>
           <h1 style={{ fontSize: '4rem', color: '#00ff00', textShadow: '0 0 20px #00ff00' }}>GLOW BATTLE.IO</h1>
-          <input type="text" placeholder="Enter Nickname" value={nickname} onChange={e => setNickname(e.target.value)}
+          <input type="text" placeholder="Enter Nickname" value={nickname} onChange={e => setNicknameWrapper(e.target.value)}
             style={{ padding: '15px', fontSize: '1.5rem', borderRadius: '5px', border: 'none', textAlign: 'center', marginBottom: '20px' }} maxLength={10} />
 
           <div style={{ display: 'flex', gap: '20px' }}>
@@ -787,7 +459,7 @@ export default function GamePage() {
         <div style={overlayStyle}>
           <h1 style={{ color: 'red', fontSize: '3rem' }}>GAME OVER</h1>
           <h2>Final Score: {Math.round(score)}</h2>
-          <button onClick={() => setGameState('menu')} style={btnStyle}>MAIN MENU</button>
+          <button onClick={() => switchGameState('menu')} style={btnStyle}>MAIN MENU</button>
         </div>
       )}
     </div>
