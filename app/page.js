@@ -29,7 +29,7 @@ export default function GamePage() {
 
   // Multiplayer Lobby State
   const [isReady, setIsReady] = useState(false);
-  const [lobbyPlayers, setLobbyPlayers] = useState([]); // Array of {id, name, ready}
+  // lobbyPlayers state removed (using otherPlayersRef)
 
   // World State
   const myPlayerCellsRef = useRef([]);
@@ -122,11 +122,17 @@ export default function GamePage() {
           setTimeLeft(GAME_DURATION_SEC);
           spawnPlayer();
         } else {
-          // Update lobby list
-          setLobbyPlayers(prev => {
-            const others = prev.filter(p => p.id !== id);
-            return [...others, { id, name, ready }];
+          // Update lobby list in the common ref (unified storage)
+          // We use the same ref so cleanup logic works automatically
+          otherPlayersRef.current.set(id, {
+            id, name, ready, lastUpdate: Date.now(),
+            cells: [] // No cells in lobby
           });
+          // Force re-render for UI update (since ref doesn't trigger render)
+          // We can use a tick state or just rely on the requestAnimationFrame loop to pick it up?
+          // The 'draw' loop runs via animate, but React UI (DOM) needs state.
+          // We'll update a dummy state to force React render for the DOM Overlay
+          setDebugInfo(prev => ({ ...prev, _tick: (prev._tick || 0) + 1 }));
         }
       })
       .on('broadcast', { event: 'player_death' }, (payload) => {
@@ -177,11 +183,8 @@ export default function GamePage() {
           });
           lastBroadcastTime = time;
         }
-        // Check if all ready (Client side logic for prototype)
-        // Also check for stale lobby playes
-        // In a real app, server decides start. Here, we can self-start if we see everyone ready.
-        // BUT, to keep it sync, let's just wait for logic.
         checkLobbyStart(channel);
+        // Force UI update for lobby list if needed (though debugInfo update below handles 1s intervals)
       }
 
       // Broadcasting Game State
@@ -201,10 +204,17 @@ export default function GamePage() {
         lastBroadcastTime = time;
       }
 
-      // Cleanup Stale Players
+      // Cleanup Stale Players (Works for Lobby AND Game now)
       const now = Date.now();
+      let changed = false;
       for (const [pid, p] of otherPlayersRef.current.entries()) {
-        if (now - p.lastUpdate > 3000) otherPlayersRef.current.delete(pid);
+        if (now - p.lastUpdate > 3000) {
+          otherPlayersRef.current.delete(pid);
+          changed = true;
+        }
+      }
+      if (changed && gameState === 'lobby') {
+        setDebugInfo(prev => ({ ...prev, _tick: (prev._tick || 0) + 1 }));
       }
 
       if (gameState === 'playing' || gameState === 'gameover' || gameState === 'lobby') {
@@ -215,7 +225,7 @@ export default function GamePage() {
       frameCount++;
       if (time - lastFpsTime >= 1000) {
         setDebugInfo({ fps: frameCount, players: otherPlayersRef.current.size + 1 });
-        updateLeaderboard(); // Update refresh
+        updateLeaderboard();
 
         if (gameState === 'playing') {
           setTimeLeft(prev => {
@@ -275,31 +285,19 @@ export default function GamePage() {
   };
 
   const checkLobbyStart = (channel) => {
-    // Must have > 1 player (including myself, so lobbyPlayers + 1? No lobbyPlayers includes me from broadcast feedback usually? 
-    // Actually broadcast {self: false} so lobbyPlayers only contains others.
-    // So total = lobbyPlayers.length + 1.
-
-    if (lobbyPlayers.length >= 1 && isReady) {
+    // Must have > 1 player (myself + at least 1 other)
+    if (otherPlayersRef.current.size >= 1 && isReady) {
       // Check if ALL others are ready
-      const allOthersReady = lobbyPlayers.every(p => p.ready);
+      let allOthersReady = true;
+      for (const p of otherPlayersRef.current.values()) {
+        if (!p.ready) { allOthersReady = false; break; }
+      }
+
       if (allOthersReady) {
-        // Start!
-        // Trigger countdown state first?
-        // For prototype simplicity: If everyone I see is ready, and I am ready, I transition to playing.
-        // Ideally one master triggers 'start_game' event.
-        // Let's simple switch to playing. 
-        // Issue: Sync start time.
-        // Hack: Just start.
         if (gameState !== 'playing') {
-          // Only IF I haven't started yet.
-          // Send a signal?
-          // Let's just create a countdown visual in lobby then start
-          // Implementing full sync without server code is hard.
-          // We trust purely local decision: "I see everyone ready, I start".
           setGameState('playing');
           spawnPlayer();
           if (gameMode === 'multi') {
-            // Dont spawn bots in multi? Or maybe a few.
             botsRef.current = [];
             initWorld(); // Reset food
           }
@@ -643,8 +641,10 @@ export default function GamePage() {
       ctx.textAlign = 'center';
       ctx.fillText("WAITING FOR PLAYERS...", canvas.width / 2, 100);
 
-      // Draw Players List
-      const players = [...lobbyPlayers, { id: myId, name: nickname || "Me", ready: isReady }];
+      // Draw Players List (From Ref + Self)
+      const players = Array.from(otherPlayersRef.current.values());
+      players.push({ id: myId, name: nickname || "Me", ready: isReady });
+
       players.forEach((p, i) => {
         ctx.fillStyle = p.ready ? '#00ff00' : '#ffff00';
         ctx.fillText(`${p.name} - ${p.ready ? 'READY' : 'WAITING'}`, canvas.width / 2, 200 + i * 40);
@@ -758,7 +758,7 @@ export default function GamePage() {
           position: 'absolute', bottom: '10%', left: '50%', transform: 'translateX(-50%)',
           textAlign: 'center'
         }}>
-          <h2 style={{ color: 'white', marginBottom: '20px' }}>Waiting for players... ({lobbyPlayers.length + 1} connected)</h2>
+          <h2 style={{ color: 'white', marginBottom: '20px' }}>Waiting for players... ({otherPlayersRef.current.size + 1} connected)</h2>
           <button
             onClick={toggleReady}
             style={{ ...btnStyle, background: isReady ? '#888' : '#0f0' }}
