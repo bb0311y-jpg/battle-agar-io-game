@@ -57,8 +57,8 @@ export default function GamePage() {
   const gameStateRef = useRef('menu');
   const timeLeftRef = useRef(GAME_DURATION_SEC);
   const isReadyRef = useRef(false);
-  const nicknameRef = useRef('');
-  const scoreRef = useRef(0);
+  const mouseRef = useRef({ x: 0, y: 0 }); // Global mouse ref
+  const cameraRef = useRef({ x: WORLD_WIDTH / 2, y: WORLD_HEIGHT / 2 });
   const gameModeRef = useRef('single');
   const isGameStartingRef = useRef(false);
   const lobbyTimerRef = useRef(0);
@@ -324,15 +324,35 @@ export default function GamePage() {
 
   const updateMyCells = (deltaTime) => {
     const dt = deltaTime / 1000;
+    const cam = cameraRef.current;
+
+    // Safety check if mouseRef is available (it should be)
+    if (!mouseRef.current) return;
+
+    // Calculate World Mouse Position
+    // Screen Mouse (0,0 is top left of browser) -> World Mouse
+    const screenX = mouseRef.current.x;
+    const screenY = mouseRef.current.y;
+
+    // We assume canvas covers whole window
+    const halfW = window.innerWidth / 2;
+    const halfH = window.innerHeight / 2;
+
+    const mouseWorldX = screenX - halfW + cam.x;
+    const mouseWorldY = screenY - halfH + cam.y;
+
     myPlayerCellsRef.current.forEach(cell => {
-      const dx = cell.targetX - cell.x;
-      const dy = cell.targetY - cell.y;
+      const dx = mouseWorldX - cell.x;
+      const dy = mouseWorldY - cell.y;
       const dist = Math.sqrt(dx * dx + dy * dy);
-      const speed = 200 * Math.pow(cell.radius, -0.4) * 5; // Adjusted speed
-      if (dist > 1) {
+      const speed = 200 * Math.pow(cell.radius, -0.4) * 8; // Adjusted speed factor
+
+      if (dist > 5) { // Deadzone
         cell.x += (dx / dist) * speed * dt;
         cell.y += (dy / dist) * speed * dt;
       }
+
+      // Bounds
       cell.x = Math.max(0, Math.min(WORLD_WIDTH, cell.x));
       cell.y = Math.max(0, Math.min(WORLD_HEIGHT, cell.y));
     });
@@ -421,14 +441,8 @@ export default function GamePage() {
 
     const handleMouseMove = (e) => {
       if (gameStateRef.current !== 'playing') return;
-      const centerX = window.innerWidth / 2;
-      const centerY = window.innerHeight / 2;
-      mouseX = e.clientX - centerX;
-      mouseY = e.clientY - centerY;
-      myPlayerCellsRef.current.forEach(cell => {
-        cell.targetX = mouseX;
-        cell.targetY = mouseY;
-      });
+      // Store SCREEN coordinates
+      mouseRef.current = { x: e.clientX, y: e.clientY };
     };
 
     const handleKeyDown = (e) => {
@@ -449,7 +463,20 @@ export default function GamePage() {
       .on('broadcast', { event: 'player_update' }, (payload) => {
         const { id, cells, score, name } = payload.payload;
         if (id !== myId) {
-          otherPlayersRef.current.set(id, { id, cells, score, name: name || 'Unknown', lastUpdate: Date.now() });
+          const prev = otherPlayersRef.current.get(id) || {};
+          // If we see a player sending updates with cells, they are playing.
+          // Improve Lobby Sync: If we are in lobby and ready, and we see someone playing, 
+          // we should probably ensure our game starts too (failsafe).
+          if (gameStateRef.current === 'lobby' && isReadyRef.current && cells && cells.length > 0) {
+            // Optional: trigger start if stuck?
+            // Actually, let's just ensure we don't lose the 'ready' flag.
+            if (!prev.ready) prev.ready = true; // Infer ready if playing
+          }
+
+          otherPlayersRef.current.set(id, {
+            ...prev,
+            id, cells, score, name: name || 'Unknown', lastUpdate: Date.now()
+          });
         }
       })
       .on('broadcast', { event: 'lobby_update' }, (payload) => {
