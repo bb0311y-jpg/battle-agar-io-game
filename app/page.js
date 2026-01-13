@@ -58,7 +58,7 @@ export default function GamePage() {
   const timeLeftRef = useRef(GAME_DURATION_SEC);
   const isReadyRef = useRef(false);
   const mouseRef = useRef({ x: 0, y: 0 }); // Global mouse ref
-  const cameraRef = useRef({ x: WORLD_WIDTH / 2, y: WORLD_HEIGHT / 2 });
+  // const cameraRef = useRef({ x: WORLD_WIDTH / 2, y: WORLD_HEIGHT / 2 }); // Removed duplicate
   const gameModeRef = useRef('single');
   const isGameStartingRef = useRef(false);
   const lobbyTimerRef = useRef(0);
@@ -406,6 +406,22 @@ export default function GamePage() {
   };
 
   const handleMultiPlayer = () => {
+    const name = (nicknameRef.current || `Player ${myId.substr(0, 4)}`).trim();
+
+    // Check for duplicate names
+    let isDuplicate = false;
+    for (const p of otherPlayersRef.current.values()) {
+      if ((p.name || '').trim().toLowerCase() === name.toLowerCase()) {
+        isDuplicate = true;
+        break;
+      }
+    }
+
+    if (isDuplicate) {
+      showNotification("Name taken! Please choose another.");
+      return;
+    }
+
     setGameMode('multi');
     switchGameState('lobby');
     // lobbyPlayers cleared via effect logic usually, but here we just ensure refs clean if needed
