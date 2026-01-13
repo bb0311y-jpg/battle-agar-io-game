@@ -106,181 +106,7 @@ export default function GamePage() {
     setTimeLeft(GAME_DURATION_SEC);
   };
 
-  useEffect(() => {
-    // Mount only ONCE
-    const canvas = canvasRef.current;
-    const ctx = canvas.getContext('2d');
-
-    let mouseX = 0;
-    let mouseY = 0;
-
-    const resizeCanvas = () => {
-      canvas.width = window.innerWidth;
-      canvas.height = window.innerHeight;
-    };
-    window.addEventListener('resize', resizeCanvas);
-    resizeCanvas();
-
-    const handleMouseMove = (e) => {
-      if (gameStateRef.current !== 'playing') return;
-      const centerX = window.innerWidth / 2;
-      const centerY = window.innerHeight / 2;
-      mouseX = e.clientX - centerX;
-      mouseY = e.clientY - centerY;
-      myPlayerCellsRef.current.forEach(cell => {
-        cell.targetX = mouseX;
-        cell.targetY = mouseY;
-      });
-    };
-
-    const handleKeyDown = (e) => {
-      if (gameStateRef.current !== 'playing') return;
-      if (e.code === 'Space') splitCells(mouseX, mouseY);
-      if (e.code === 'KeyW') ejectMass(mouseX, mouseY);
-    };
-
-    window.addEventListener('mousemove', handleMouseMove);
-    window.addEventListener('keydown', handleKeyDown);
-
-    // Network Setup
-    const channel = supabase.channel('room_1', {
-      config: { broadcast: { self: false, ack: false } },
-    });
-
-    channel
-      .on('broadcast', { event: 'player_update' }, (payload) => {
-        const { id, cells, score, name } = payload.payload;
-        if (id !== myId) {
-          otherPlayersRef.current.set(id, { id, cells, score, name: name || 'Unknown', lastUpdate: Date.now() });
-        }
-      })
-      .on('broadcast', { event: 'lobby_update' }, (payload) => {
-        const { id, name, ready, status } = payload.payload;
-        if (status === 'start_game') {
-          otherPlayersRef.current.forEach(p => p.cells = []);
-          switchGameState('playing');
-          setTimeLeft(GAME_DURATION_SEC);
-          timeLeftRef.current = GAME_DURATION_SEC;
-
-          spawnPlayer();
-        } else {
-          otherPlayersRef.current.set(id, {
-            id, name: name || 'Unknown', ready, lastUpdate: Date.now(),
-            cells: []
-          });
-        }
-      })
-      .on('broadcast', { event: 'player_death' }, (payload) => {
-        otherPlayersRef.current.delete(payload.payload.id);
-      })
-      .subscribe();
-
-    channelRef.current = channel;
-
-    // Game Loop
-    let lastTime = performance.now();
-    let frameCount = 0;
-    let lastFpsTime = lastTime;
-    let lastBroadcastTime = 0;
-    let jackpotTimer = 0;
-
-    const animate = (time) => {
-      try {
-        const deltaTime = time - lastTime;
-        lastTime = time;
-
-        const currentGS = gameStateRef.current;
-
-        if (currentGS === 'playing') {
-          updateMyCells(deltaTime);
-          updateEjectedMass(deltaTime);
-          updateBots(deltaTime);
-          checkCollisions(myId, channel);
-          recalcScore();
-          updateCamera();
-
-          setEffects(prev => prev.filter(e => e.life > 0).map(e => ({ ...e, life: e.life - 0.02 })));
-
-          jackpotTimer += deltaTime;
-          if (jackpotTimer > 15000) {
-            if (Math.random() < 0.8) {
-              spawnJackpot();
-              showNotification("🎰 JACKPOT ORB SPAWNED! 🎰");
-            }
-            jackpotTimer = 0;
-          }
-        } else if (currentGS === 'lobby') {
-          if (time - lastBroadcastTime > 1000) {
-            const myName = `Player ${myId.substr(0, 4)}`;
-            channel.send({
-              type: 'broadcast', event: 'lobby_update',
-              payload: { id: myId, name: nicknameRef.current || myName, ready: isReadyRef.current }
-            });
-            lastBroadcastTime = time;
-          }
-          checkLobbyStart(channel, deltaTime);
-          setDebugInfo(prev => ({ ...prev, tick: (prev.tick || 0) + 1 }));
-        }
-
-        if (currentGS === 'playing' && time - lastBroadcastTime > 50) {
-          channel.send({
-            type: 'broadcast', event: 'player_update',
-            payload: {
-              id: myId,
-              score: scoreRef.current, // Use Score Ref!
-              name: nicknameRef.current || `Player ${myId.substr(0, 4)}`,
-              cells: myPlayerCellsRef.current.map(c => ({
-                id: c.id, x: Math.round(c.x), y: Math.round(c.y),
-                radius: c.radius, color: c.color, name: c.name
-              }))
-            },
-          });
-          lastBroadcastTime = time;
-        }
-
-        // Cleanup
-        const now = Date.now();
-        for (const [pid, p] of otherPlayersRef.current.entries()) {
-          if (now - p.lastUpdate > 3000) otherPlayersRef.current.delete(pid);
-        }
-
-        if (currentGS === 'playing' || currentGS === 'gameover' || currentGS === 'lobby') {
-          draw(ctx, canvas, currentGS);
-        }
-
-        // Timer & Stats
-        frameCount++;
-        if (time - lastFpsTime >= 1000) {
-          setDebugInfo({ fps: frameCount, players: otherPlayersRef.current.size + 1 });
-          updateLeaderboard();
-
-          if (currentGS === 'playing') {
-            timeLeftRef.current -= 1;
-            setTimeLeft(timeLeftRef.current);
-            if (timeLeftRef.current <= 0) {
-              switchGameState('gameover');
-            }
-          }
-          frameCount = 0;
-          lastFpsTime = time;
-        }
-      } catch (err) {
-        console.error("Game Loop Error:", err);
-      }
-
-      requestRef.current = requestAnimationFrame(animate);
-    };
-
-    requestRef.current = requestAnimationFrame(animate);
-
-    return () => {
-      window.removeEventListener('resize', resizeCanvas);
-      window.removeEventListener('mousemove', handleMouseMove);
-      window.removeEventListener('keydown', handleKeyDown);
-      cancelAnimationFrame(requestRef.current);
-      supabase.removeChannel(channel);
-    };
-  }, []); // Mount ONCE. Game loop relies on Refs for state updates.
+  // Moved useEffect to bottom to ensure all helper functions are defined before use in closures.
 
 
   // --- Logic ---
@@ -514,90 +340,268 @@ export default function GamePage() {
   };
 
   const splitCells = (dirX, dirY) => {
+    // TODO: Implement split logic
+  };
 
-    return (
-      <div style={{ width: '100vw', height: '100vh', overflow: 'hidden', userSelect: 'none', fontFamily: 'sans-serif' }}>
-        <canvas ref={canvasRef} style={{ display: 'block' }} />
+  useEffect(() => {
+    // Mount only ONCE
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext('2d');
 
-        {notification && (
-          <div style={{
-            position: 'absolute', top: '15%', left: '50%', transform: 'translateX(-50%)',
-            color: '#ffd700', fontSize: '3rem', fontWeight: 'bold', textShadow: '0 0 20px black'
-          }}>
-            {notification}
-          </div>
-        )}
+    let mouseX = 0;
+    let mouseY = 0;
 
-        {/* Leaderboard - Top Left */}
-        {(gameState === 'playing' || gameState === 'gameover') && (
-          <div style={{
-            position: 'absolute', top: 10, left: 10,
-            background: 'rgba(0,0,0,0.5)', padding: '10px', borderRadius: '5px',
-            color: 'white', fontSize: '14px', width: '200px'
-          }}>
-            <div style={{ borderBottom: '1px solid #eba', marginBottom: '5px', fontWeight: 'bold', color: '#eba' }}>LEADERBOARD</div>
-            {leaderboard.map((p, i) => (
-              <div key={i} style={{ display: 'flex', justifyContent: 'space-between', color: p.isMe ? '#ff0' : '#fff' }}>
-                <span>{i + 1}. {p.name.substring(0, 10)}</span>
-                <span>{Math.round(p.score)}</span>
-              </div>
-            ))}
-          </div>
-        )}
+    const resizeCanvas = () => {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+    };
+    window.addEventListener('resize', resizeCanvas);
+    resizeCanvas();
 
-        {gameState === 'playing' && (
-          <>
-            <div style={{
-              position: 'absolute', top: 20, left: '50%', transform: 'translateX(-50%)',
-              color: timeLeft < 30 ? 'red' : 'white', fontSize: '3rem', fontWeight: 'bold', textShadow: '0 0 10px black'
-            }}>
-              {formatTime(timeLeft)}
+    const handleMouseMove = (e) => {
+      if (gameStateRef.current !== 'playing') return;
+      const centerX = window.innerWidth / 2;
+      const centerY = window.innerHeight / 2;
+      mouseX = e.clientX - centerX;
+      mouseY = e.clientY - centerY;
+      myPlayerCellsRef.current.forEach(cell => {
+        cell.targetX = mouseX;
+        cell.targetY = mouseY;
+      });
+    };
+
+    const handleKeyDown = (e) => {
+      if (gameStateRef.current !== 'playing') return;
+      if (e.code === 'Space') splitCells(mouseX, mouseY);
+      if (e.code === 'KeyW') ejectMass(mouseX, mouseY);
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('keydown', handleKeyDown);
+
+    // Network Setup
+    const channel = supabase.channel('room_1', {
+      config: { broadcast: { self: false, ack: false } },
+    });
+
+    channel
+      .on('broadcast', { event: 'player_update' }, (payload) => {
+        const { id, cells, score, name } = payload.payload;
+        if (id !== myId) {
+          otherPlayersRef.current.set(id, { id, cells, score, name: name || 'Unknown', lastUpdate: Date.now() });
+        }
+      })
+      .on('broadcast', { event: 'lobby_update' }, (payload) => {
+        const { id, name, ready, status } = payload.payload;
+        if (status === 'start_game') {
+          otherPlayersRef.current.forEach(p => p.cells = []);
+          switchGameState('playing');
+          setTimeLeft(GAME_DURATION_SEC);
+          timeLeftRef.current = GAME_DURATION_SEC;
+
+          spawnPlayer();
+        } else {
+          otherPlayersRef.current.set(id, {
+            id, name: name || 'Unknown', ready, lastUpdate: Date.now(),
+            cells: []
+          });
+        }
+      })
+      .on('broadcast', { event: 'player_death' }, (payload) => {
+        otherPlayersRef.current.delete(payload.payload.id);
+      })
+      .subscribe();
+
+    channelRef.current = channel;
+
+    // Game Loop
+    let lastTime = performance.now();
+    let frameCount = 0;
+    let lastFpsTime = lastTime;
+    let lastBroadcastTime = 0;
+    let jackpotTimer = 0;
+
+    const animate = (time) => {
+      try {
+        const deltaTime = time - lastTime;
+        lastTime = time;
+
+        const currentGS = gameStateRef.current;
+
+        if (currentGS === 'playing') {
+          updateMyCells(deltaTime);
+          updateEjectedMass(deltaTime);
+          updateBots(deltaTime);
+          checkCollisions(myId, channel);
+          recalcScore();
+          updateCamera();
+
+          setEffects(prev => prev.filter(e => e.life > 0).map(e => ({ ...e, life: e.life - 0.02 })));
+
+          jackpotTimer += deltaTime;
+          if (jackpotTimer > 15000) {
+            if (Math.random() < 0.8) {
+              spawnJackpot();
+              showNotification("🎰 JACKPOT ORB SPAWNED! 🎰");
+            }
+            jackpotTimer = 0;
+          }
+        } else if (currentGS === 'lobby') {
+          if (time - lastBroadcastTime > 1000) {
+            const myName = `Player ${myId.substr(0, 4)}`;
+            channel.send({
+              type: 'broadcast', event: 'lobby_update',
+              payload: { id: myId, name: nicknameRef.current || myName, ready: isReadyRef.current }
+            });
+            lastBroadcastTime = time;
+          }
+          checkLobbyStart(channel, deltaTime);
+          setDebugInfo(prev => ({ ...prev, tick: (prev.tick || 0) + 1 }));
+        }
+
+        if (currentGS === 'playing' && time - lastBroadcastTime > 50) {
+          channel.send({
+            type: 'broadcast', event: 'player_update',
+            payload: {
+              id: myId,
+              score: scoreRef.current, // Use Score Ref!
+              name: nicknameRef.current || `Player ${myId.substr(0, 4)}`,
+              cells: myPlayerCellsRef.current.map(c => ({
+                id: c.id, x: Math.round(c.x), y: Math.round(c.y),
+                radius: c.radius, color: c.color, name: c.name
+              }))
+            },
+          });
+          lastBroadcastTime = time;
+        }
+
+        // Cleanup
+        const now = Date.now();
+        for (const [pid, p] of otherPlayersRef.current.entries()) {
+          if (now - p.lastUpdate > 3000) otherPlayersRef.current.delete(pid);
+        }
+
+        if (currentGS === 'playing' || currentGS === 'gameover' || currentGS === 'lobby') {
+          draw(ctx, canvas, currentGS);
+        }
+
+        // Timer & Stats
+        frameCount++;
+        if (time - lastFpsTime >= 1000) {
+          setDebugInfo({ fps: frameCount, players: otherPlayersRef.current.size + 1 });
+          updateLeaderboard();
+
+          if (currentGS === 'playing') {
+            timeLeftRef.current -= 1;
+            setTimeLeft(timeLeftRef.current);
+            if (timeLeftRef.current <= 0) {
+              switchGameState('gameover');
+            }
+          }
+          frameCount = 0;
+          lastFpsTime = time;
+        }
+      } catch (err) {
+        console.error("Game Loop Error:", err);
+      }
+
+      requestRef.current = requestAnimationFrame(animate);
+    };
+
+    requestRef.current = requestAnimationFrame(animate);
+
+    return () => {
+      window.removeEventListener('resize', resizeCanvas);
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('keydown', handleKeyDown);
+      cancelAnimationFrame(requestRef.current);
+      supabase.removeChannel(channel);
+    };
+  }, []); // Mount ONCE. Game loop relies on Refs for state updates.
+
+  return (
+    <div style={{ width: '100vw', height: '100vh', overflow: 'hidden', userSelect: 'none', fontFamily: 'sans-serif' }}>
+      <canvas ref={canvasRef} style={{ display: 'block' }} />
+
+      {notification && (
+        <div style={{
+          position: 'absolute', top: '15%', left: '50%', transform: 'translateX(-50%)',
+          color: '#ffd700', fontSize: '3rem', fontWeight: 'bold', textShadow: '0 0 20px black'
+        }}>
+          {notification}
+        </div>
+      )}
+
+      {/* Leaderboard - Top Left */}
+      {(gameState === 'playing' || gameState === 'gameover') && (
+        <div style={{
+          position: 'absolute', top: 10, left: 10,
+          background: 'rgba(0,0,0,0.5)', padding: '10px', borderRadius: '5px',
+          color: 'white', fontSize: '14px', width: '200px'
+        }}>
+          <div style={{ borderBottom: '1px solid #eba', marginBottom: '5px', fontWeight: 'bold', color: '#eba' }}>LEADERBOARD</div>
+          {leaderboard.map((p, i) => (
+            <div key={i} style={{ display: 'flex', justifyContent: 'space-between', color: p.isMe ? '#ff0' : '#fff' }}>
+              <span>{i + 1}. {p.name.substring(0, 10)}</span>
+              <span>{Math.round(p.score)}</span>
             </div>
-            <div style={{ position: 'absolute', bottom: 20, left: 20, color: 'rgba(255,255,255,0.5)', fontSize: '1rem' }}>
-              [Space] Split &nbsp; [W] Shoot Mass
-            </div>
-          </>
-        )}
+          ))}
+        </div>
+      )}
 
-        {gameState === 'lobby' && (
+      {gameState === 'playing' && (
+        <>
           <div style={{
-            position: 'absolute', bottom: '10%', left: '50%', transform: 'translateX(-50%)',
-            textAlign: 'center'
+            position: 'absolute', top: 20, left: '50%', transform: 'translateX(-50%)',
+            color: timeLeft < 30 ? 'red' : 'white', fontSize: '3rem', fontWeight: 'bold', textShadow: '0 0 10px black'
           }}>
-            <h2 style={{ color: 'white', marginBottom: '20px' }}>Waiting for players... ({otherPlayersRef.current.size + 1} connected)</h2>
-            <button
-              onClick={toggleReady}
-              style={{ ...btnStyle, background: isReady ? '#888' : '#0f0' }}
-            >
-              {isReady ? 'CANCEL READY' : 'READY UP!'}
-            </button>
-            <div style={{ color: '#aaa', marginTop: '10px' }}>Needs at least 2 players to start</div>
+            {formatTime(timeLeft)}
           </div>
-        )}
-
-        {gameState === 'menu' && (
-          <div style={overlayStyle}>
-            <h1 style={{ fontSize: '4rem', color: '#00ff00', textShadow: '0 0 20px #00ff00' }}>GLOW BATTLE.IO</h1>
-            <input type="text" placeholder="Enter Nickname" value={nickname} onChange={e => setNicknameWrapper(e.target.value)}
-              style={{ padding: '15px', fontSize: '1.5rem', borderRadius: '5px', border: 'none', textAlign: 'center', marginBottom: '20px' }} maxLength={10} />
-
-            <div style={{ display: 'flex', gap: '20px' }}>
-              <button onClick={handleSinglePlayer} style={btnStyle}>SINGLE PLAYER</button>
-              <button onClick={handleMultiPlayer} style={{ ...btnStyle, background: 'linear-gradient(45deg, #00bdff, #0077ff)' }}>MULTIPLAYER</button>
-            </div>
+          <div style={{ position: 'absolute', bottom: 20, left: 20, color: 'rgba(255,255,255,0.5)', fontSize: '1rem' }}>
+            [Space] Split &nbsp; [W] Shoot Mass
           </div>
-        )}
+        </>
+      )}
 
-        {gameState === 'gameover' && (
-          <div style={overlayStyle}>
-            <h1 style={{ color: 'red', fontSize: '3rem' }}>GAME OVER</h1>
-            <h2>Final Score: {Math.round(score)}</h2>
-            <button onClick={() => switchGameState('menu')} style={btnStyle}>MAIN MENU</button>
+      {gameState === 'lobby' && (
+        <div style={{
+          position: 'absolute', bottom: '10%', left: '50%', transform: 'translateX(-50%)',
+          textAlign: 'center'
+        }}>
+          <h2 style={{ color: 'white', marginBottom: '20px' }}>Waiting for players... ({otherPlayersRef.current.size + 1} connected)</h2>
+          <button
+            onClick={toggleReady}
+            style={{ ...btnStyle, background: isReady ? '#888' : '#0f0' }}
+          >
+            {isReady ? 'CANCEL READY' : 'READY UP!'}
+          </button>
+          <div style={{ color: '#aaa', marginTop: '10px' }}>Needs at least 2 players to start</div>
+        </div>
+      )}
+
+      {gameState === 'menu' && (
+        <div style={overlayStyle}>
+          <h1 style={{ fontSize: '4rem', color: '#00ff00', textShadow: '0 0 20px #00ff00' }}>GLOW BATTLE.IO</h1>
+          <input type="text" placeholder="Enter Nickname" value={nickname} onChange={e => setNicknameWrapper(e.target.value)}
+            style={{ padding: '15px', fontSize: '1.5rem', borderRadius: '5px', border: 'none', textAlign: 'center', marginBottom: '20px' }} maxLength={10} />
+
+          <div style={{ display: 'flex', gap: '20px' }}>
+            <button onClick={handleSinglePlayer} style={btnStyle}>SINGLE PLAYER</button>
+            <button onClick={handleMultiPlayer} style={{ ...btnStyle, background: 'linear-gradient(45deg, #00bdff, #0077ff)' }}>MULTIPLAYER</button>
           </div>
-        )}
-      </div>
-    );
-  }
+        </div>
+      )}
 
-  const overlayStyle = { position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', background: 'rgba(10,10,20, 0.9)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'white', zIndex: 10 };
-  const btnStyle = { padding: '15px 30px', fontSize: '1.5rem', background: 'linear-gradient(45deg, #00ff00, #00cc00)', color: 'white', border: 'none', borderRadius: '50px', cursor: 'pointer', fontWeight: 'bold', boxShadow: '0 0 20px rgba(0,255,0,0.5)', minWidth: '200px' };
+      {gameState === 'gameover' && (
+        <div style={overlayStyle}>
+          <h1 style={{ color: 'red', fontSize: '3rem' }}>GAME OVER</h1>
+          <h2>Final Score: {Math.round(score)}</h2>
+          <button onClick={() => switchGameState('menu')} style={btnStyle}>MAIN MENU</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+const overlayStyle = { position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', background: 'rgba(10,10,20, 0.9)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'white', zIndex: 10 };
+const btnStyle = { padding: '15px 30px', fontSize: '1.5rem', background: 'linear-gradient(45deg, #00ff00, #00cc00)', color: 'white', border: 'none', borderRadius: '50px', cursor: 'pointer', fontWeight: 'bold', boxShadow: '0 0 20px rgba(0,255,0,0.5)', minWidth: '200px' };
