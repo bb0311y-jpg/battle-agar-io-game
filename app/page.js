@@ -57,6 +57,8 @@ export default function GamePage() {
   const gameStateRef = useRef('menu');
   const timeLeftRef = useRef(GAME_DURATION_SEC);
   const isReadyRef = useRef(false);
+  const nicknameRef = useRef('');
+  const scoreRef = useRef(0);
   const mouseRef = useRef({ x: 0, y: 0 }); // Global mouse ref
   // const cameraRef = useRef({ x: WORLD_WIDTH / 2, y: WORLD_HEIGHT / 2 }); // Removed duplicate
   const gameModeRef = useRef('single');
