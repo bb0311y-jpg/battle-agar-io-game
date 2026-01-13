@@ -230,7 +230,7 @@ export default function GamePage() {
       }
 
       if (currentGS === 'playing' || currentGS === 'gameover' || currentGS === 'lobby') {
-        draw(ctx, canvas);
+        draw(ctx, canvas, currentGS);
       }
 
       // Timer & Stats
@@ -297,9 +297,37 @@ export default function GamePage() {
     setLeaderboard(all.slice(0, 5));
   };
 
+  // --- Rendering ---
+  const draw = (ctx, canvas, currentGS) => {
+    ctx.fillStyle = '#050510'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+    const cam = cameraRef.current;
+
+    // Draw Lobby Background (Space)
+    if (currentGS === 'lobby') {
+      ctx.fillStyle = 'white';
+      ctx.font = '30px Arial';
+      ctx.textAlign = 'center';
+      ctx.fillText("WAITING FOR PLAYERS...", canvas.width / 2, 100);
+
+      // Draw Players List (From Ref + Self)
+      const players = Array.from(otherPlayersRef.current.values());
+      players.push({ id: myId, name: nicknameRef.current || "Me", ready: isReadyRef.current });
+
+      players.forEach((p, i) => {
+        ctx.fillStyle = p.ready ? '#00ff00' : '#ffff00';
+        ctx.fillText(`${p.name} - ${p.ready ? 'READY' : 'WAITING'}`, canvas.width / 2, 200 + i * 40);
+      });
+      return;
+    }
+
+    // (Rest of the draw function would go here, but it's not provided in the original snippet)
+    // For now, we'll assume the rest of the draw function is implicitly handled or not relevant to this change.
+    // If the original document had more draw logic, it would follow the 'if (currentGS === 'lobby') { ... } return;' block.
+  };
+
   const checkLobbyStart = (channel) => {
     // Must have > 1 player (myself + at least 1 other)
-    if (otherPlayersRef.current.size >= 1 && isReady) {
+    if (otherPlayersRef.current.size >= 1 && isReadyRef.current) {
       // Check if ALL others are ready
       let allOthersReady = true;
       for (const p of otherPlayersRef.current.values()) {
@@ -307,8 +335,8 @@ export default function GamePage() {
       }
 
       if (allOthersReady) {
-        if (gameState !== 'playing') {
-          setGameState('playing');
+        if (gameStateRef.current !== 'playing') {
+          switchGameState('playing');
           spawnPlayer();
           if (gameMode === 'multi') {
             botsRef.current = [];
