@@ -315,6 +315,12 @@ export default function GamePage() {
     setTimeout(() => setNotification(null), 3000);
   };
 
+  const formatTime = (seconds) => {
+    const m = Math.floor(seconds / 60);
+    const s = Math.floor(seconds % 60);
+    return `${m}:${s < 10 ? '0' : ''}${s}`;
+  };
+
   // UI Actions
   const handleSinglePlayer = () => {
     setGameMode('single');
