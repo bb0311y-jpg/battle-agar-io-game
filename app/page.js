@@ -430,91 +430,99 @@ export default function GamePage() {
     setIsReadyWrapper(newState);
   };
 
-  // (Rest of functions...)
+  const spawnPlayer = () => {
+    const startName = (nicknameRef.current || '').trim() || `Player ${myId.substr(0, 4)}`;
+    myPlayerCellsRef.current = [createInitialCell(startName)];
+    setScore(0);
+    scoreRef.current = 0;
+    setTimeLeft(GAME_DURATION_SEC);
+  };
 
-  return (
-    <div style={{ width: '100vw', height: '100vh', overflow: 'hidden', userSelect: 'none', fontFamily: 'sans-serif' }}>
-      <canvas ref={canvasRef} style={{ display: 'block' }} />
+  const splitCells = (dirX, dirY) => {
 
-      {notification && (
-        <div style={{
-          position: 'absolute', top: '15%', left: '50%', transform: 'translateX(-50%)',
-          color: '#ffd700', fontSize: '3rem', fontWeight: 'bold', textShadow: '0 0 20px black'
-        }}>
-          {notification}
-        </div>
-      )}
+    return (
+      <div style={{ width: '100vw', height: '100vh', overflow: 'hidden', userSelect: 'none', fontFamily: 'sans-serif' }}>
+        <canvas ref={canvasRef} style={{ display: 'block' }} />
 
-      {/* Leaderboard - Top Left */}
-      {(gameState === 'playing' || gameState === 'gameover') && (
-        <div style={{
-          position: 'absolute', top: 10, left: 10,
-          background: 'rgba(0,0,0,0.5)', padding: '10px', borderRadius: '5px',
-          color: 'white', fontSize: '14px', width: '200px'
-        }}>
-          <div style={{ borderBottom: '1px solid #eba', marginBottom: '5px', fontWeight: 'bold', color: '#eba' }}>LEADERBOARD</div>
-          {leaderboard.map((p, i) => (
-            <div key={i} style={{ display: 'flex', justifyContent: 'space-between', color: p.isMe ? '#ff0' : '#fff' }}>
-              <span>{i + 1}. {p.name.substring(0, 10)}</span>
-              <span>{Math.round(p.score)}</span>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {gameState === 'playing' && (
-        <>
+        {notification && (
           <div style={{
-            position: 'absolute', top: 20, left: '50%', transform: 'translateX(-50%)',
-            color: timeLeft < 30 ? 'red' : 'white', fontSize: '3rem', fontWeight: 'bold', textShadow: '0 0 10px black'
+            position: 'absolute', top: '15%', left: '50%', transform: 'translateX(-50%)',
+            color: '#ffd700', fontSize: '3rem', fontWeight: 'bold', textShadow: '0 0 20px black'
           }}>
-            {formatTime(timeLeft)}
+            {notification}
           </div>
-          <div style={{ position: 'absolute', bottom: 20, left: 20, color: 'rgba(255,255,255,0.5)', fontSize: '1rem' }}>
-            [Space] Split &nbsp; [W] Shoot Mass
+        )}
+
+        {/* Leaderboard - Top Left */}
+        {(gameState === 'playing' || gameState === 'gameover') && (
+          <div style={{
+            position: 'absolute', top: 10, left: 10,
+            background: 'rgba(0,0,0,0.5)', padding: '10px', borderRadius: '5px',
+            color: 'white', fontSize: '14px', width: '200px'
+          }}>
+            <div style={{ borderBottom: '1px solid #eba', marginBottom: '5px', fontWeight: 'bold', color: '#eba' }}>LEADERBOARD</div>
+            {leaderboard.map((p, i) => (
+              <div key={i} style={{ display: 'flex', justifyContent: 'space-between', color: p.isMe ? '#ff0' : '#fff' }}>
+                <span>{i + 1}. {p.name.substring(0, 10)}</span>
+                <span>{Math.round(p.score)}</span>
+              </div>
+            ))}
           </div>
-        </>
-      )}
+        )}
 
-      {gameState === 'lobby' && (
-        <div style={{
-          position: 'absolute', bottom: '10%', left: '50%', transform: 'translateX(-50%)',
-          textAlign: 'center'
-        }}>
-          <h2 style={{ color: 'white', marginBottom: '20px' }}>Waiting for players... ({otherPlayersRef.current.size + 1} connected)</h2>
-          <button
-            onClick={toggleReady}
-            style={{ ...btnStyle, background: isReady ? '#888' : '#0f0' }}
-          >
-            {isReady ? 'CANCEL READY' : 'READY UP!'}
-          </button>
-          <div style={{ color: '#aaa', marginTop: '10px' }}>Needs at least 2 players to start</div>
-        </div>
-      )}
+        {gameState === 'playing' && (
+          <>
+            <div style={{
+              position: 'absolute', top: 20, left: '50%', transform: 'translateX(-50%)',
+              color: timeLeft < 30 ? 'red' : 'white', fontSize: '3rem', fontWeight: 'bold', textShadow: '0 0 10px black'
+            }}>
+              {formatTime(timeLeft)}
+            </div>
+            <div style={{ position: 'absolute', bottom: 20, left: 20, color: 'rgba(255,255,255,0.5)', fontSize: '1rem' }}>
+              [Space] Split &nbsp; [W] Shoot Mass
+            </div>
+          </>
+        )}
 
-      {gameState === 'menu' && (
-        <div style={overlayStyle}>
-          <h1 style={{ fontSize: '4rem', color: '#00ff00', textShadow: '0 0 20px #00ff00' }}>GLOW BATTLE.IO</h1>
-          <input type="text" placeholder="Enter Nickname" value={nickname} onChange={e => setNicknameWrapper(e.target.value)}
-            style={{ padding: '15px', fontSize: '1.5rem', borderRadius: '5px', border: 'none', textAlign: 'center', marginBottom: '20px' }} maxLength={10} />
-
-          <div style={{ display: 'flex', gap: '20px' }}>
-            <button onClick={handleSinglePlayer} style={btnStyle}>SINGLE PLAYER</button>
-            <button onClick={handleMultiPlayer} style={{ ...btnStyle, background: 'linear-gradient(45deg, #00bdff, #0077ff)' }}>MULTIPLAYER</button>
+        {gameState === 'lobby' && (
+          <div style={{
+            position: 'absolute', bottom: '10%', left: '50%', transform: 'translateX(-50%)',
+            textAlign: 'center'
+          }}>
+            <h2 style={{ color: 'white', marginBottom: '20px' }}>Waiting for players... ({otherPlayersRef.current.size + 1} connected)</h2>
+            <button
+              onClick={toggleReady}
+              style={{ ...btnStyle, background: isReady ? '#888' : '#0f0' }}
+            >
+              {isReady ? 'CANCEL READY' : 'READY UP!'}
+            </button>
+            <div style={{ color: '#aaa', marginTop: '10px' }}>Needs at least 2 players to start</div>
           </div>
-        </div>
-      )}
+        )}
 
-      {gameState === 'gameover' && (
-        <div style={overlayStyle}>
-          <h1 style={{ color: 'red', fontSize: '3rem' }}>GAME OVER</h1>
-          <h2>Final Score: {Math.round(score)}</h2>
-          <button onClick={() => switchGameState('menu')} style={btnStyle}>MAIN MENU</button>
-        </div>
-      )}
-    </div>
-  );
-}
+        {gameState === 'menu' && (
+          <div style={overlayStyle}>
+            <h1 style={{ fontSize: '4rem', color: '#00ff00', textShadow: '0 0 20px #00ff00' }}>GLOW BATTLE.IO</h1>
+            <input type="text" placeholder="Enter Nickname" value={nickname} onChange={e => setNicknameWrapper(e.target.value)}
+              style={{ padding: '15px', fontSize: '1.5rem', borderRadius: '5px', border: 'none', textAlign: 'center', marginBottom: '20px' }} maxLength={10} />
 
-const overlayStyle = { position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', background: 'rgba(10,10,20, 0.9)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'white', zIndex: 10 };
-const btnStyle = { padding: '15px 30px', fontSize: '1.5rem', background: 'linear-gradient(45deg, #00ff00, #00cc00)', color: 'white', border: 'none', borderRadius: '50px', cursor: 'pointer', fontWeight: 'bold', boxShadow: '0 0 20px rgba(0,255,0,0.5)', minWidth: '200px' };
+            <div style={{ display: 'flex', gap: '20px' }}>
+              <button onClick={handleSinglePlayer} style={btnStyle}>SINGLE PLAYER</button>
+              <button onClick={handleMultiPlayer} style={{ ...btnStyle, background: 'linear-gradient(45deg, #00bdff, #0077ff)' }}>MULTIPLAYER</button>
+            </div>
+          </div>
+        )}
+
+        {gameState === 'gameover' && (
+          <div style={overlayStyle}>
+            <h1 style={{ color: 'red', fontSize: '3rem' }}>GAME OVER</h1>
+            <h2>Final Score: {Math.round(score)}</h2>
+            <button onClick={() => switchGameState('menu')} style={btnStyle}>MAIN MENU</button>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  const overlayStyle = { position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', background: 'rgba(10,10,20, 0.9)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'white', zIndex: 10 };
+  const btnStyle = { padding: '15px 30px', fontSize: '1.5rem', background: 'linear-gradient(45deg, #00ff00, #00cc00)', color: 'white', border: 'none', borderRadius: '50px', cursor: 'pointer', fontWeight: 'bold', boxShadow: '0 0 20px rgba(0,255,0,0.5)', minWidth: '200px' };
