@@ -20,7 +20,7 @@ export default function GamePage() {
   const [debugInfo, setDebugInfo] = useState({ fps: 0, players: 0 });
   const [gameState, setGameState] = useState('menu'); // 'menu', 'lobby', 'countdown', 'playing', 'gameover'
   const [gameMode, setGameMode] = useState('single'); // 'single', 'multi'
-  const [myId, setMyId] = useState(null);
+  const [myId] = useState(() => Math.random().toString(36).substr(2, 9)); // Stable ID
   const [nickname, setNickname] = useState('');
   const [score, setScore] = useState(0);
   const [timeLeft, setTimeLeft] = useState(GAME_DURATION_SEC);
@@ -65,8 +65,8 @@ export default function GamePage() {
   });
 
   useEffect(() => {
-    const id = Math.random().toString(36).substr(2, 9);
-    setMyId(id);
+    // Initial World Setup
+    if (gameState === 'playing' || gameState === 'single') initWorld();
 
     const canvas = canvasRef.current;
     const ctx = canvas.getContext('2d');
@@ -111,27 +111,28 @@ export default function GamePage() {
       .on('broadcast', { event: 'player_update' }, (payload) => {
         const { id, cells, score, name } = payload.payload;
         if (id !== myId) {
-          otherPlayersRef.current.set(id, { cells, score, name, lastUpdate: Date.now() });
+          otherPlayersRef.current.set(id, { id, cells, score, name, lastUpdate: Date.now() });
         }
       })
       .on('broadcast', { event: 'lobby_update' }, (payload) => {
         // Handle lobby state sync
         const { id, name, ready, status } = payload.payload;
         if (status === 'start_game') {
+          otherPlayersRef.current.clear(); // Clear other players when game starts?
+          // Wait, if other players are also starting, we need them!
+          // If we clear here, we lose them until they update.
+          // Better to NOT clear, but reset their cells.
+          otherPlayersRef.current.forEach(p => p.cells = []);
+
           setGameState('playing');
           setTimeLeft(GAME_DURATION_SEC);
           spawnPlayer();
         } else {
-          // Update lobby list in the common ref (unified storage)
-          // We use the same ref so cleanup logic works automatically
+          // Update lobby list
           otherPlayersRef.current.set(id, {
             id, name, ready, lastUpdate: Date.now(),
-            cells: [] // No cells in lobby
+            cells: []
           });
-          // Force re-render for UI update (since ref doesn't trigger render)
-          // We can use a tick state or just rely on the requestAnimationFrame loop to pick it up?
-          // The 'draw' loop runs via animate, but React UI (DOM) needs state.
-          // We'll update a dummy state to force React render for the DOM Overlay
           setDebugInfo(prev => ({ ...prev, _tick: (prev._tick || 0) + 1 }));
         }
       })
