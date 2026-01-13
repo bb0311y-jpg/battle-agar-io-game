@@ -60,6 +60,8 @@ export default function GamePage() {
   const nicknameRef = useRef('');
   const scoreRef = useRef(0);
   const gameModeRef = useRef('single');
+  const isGameStartingRef = useRef(false);
+  const lobbyTimerRef = useRef(0);
 
   // Helper to switch state cleanly
   const switchGameState = (newState) => {
@@ -215,7 +217,7 @@ export default function GamePage() {
             });
             lastBroadcastTime = time;
           }
-          checkLobbyStart(channel);
+          checkLobbyStart(channel, deltaTime);
           setDebugInfo(prev => ({ ...prev, tick: (prev.tick || 0) + 1 }));
         }
 
@@ -327,7 +329,14 @@ export default function GamePage() {
       ctx.fillStyle = 'white';
       ctx.font = '30px Arial';
       ctx.textAlign = 'center';
-      ctx.fillText("WAITING FOR PLAYERS...", canvas.width / 2, 100);
+
+      if (isGameStartingRef.current) {
+        ctx.fillStyle = '#00ff00';
+        ctx.font = '60px Arial';
+        ctx.fillText(`STARTING IN ${Math.ceil(lobbyTimerRef.current)}...`, canvas.width / 2, 100);
+      } else {
+        ctx.fillText("WAITING FOR PLAYERS...", canvas.width / 2, 100);
+      }
 
       // Draw Players List (From Ref + Self)
       const players = Array.from(otherPlayersRef.current.values());
@@ -340,13 +349,67 @@ export default function GamePage() {
       return;
     }
 
-    // (Rest of the draw function would go here, but it's not provided in the original snippet)
-    // For now, we'll assume the rest of the draw function is implicitly handled or not relevant to this change.
-    // If the original document had more draw logic, it would follow the 'if (currentGS === 'lobby') { ... } return;' block.
+    // (Rest of the draw function...)
+    ctx.save();
+    ctx.translate((canvas.width / 2) - cam.x, (canvas.height / 2) - cam.y);
+
+    ctx.strokeStyle = '#333'; ctx.lineWidth = 10; ctx.strokeRect(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
+    // ... grids ...
+    ctx.strokeStyle = '#222'; ctx.lineWidth = 2;
+    for (let x = 0; x <= WORLD_WIDTH; x += 100) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, WORLD_HEIGHT); ctx.stroke(); }
+    for (let y = 0; y <= WORLD_HEIGHT; y += 100) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(WORLD_WIDTH, y); ctx.stroke(); }
+
+    // ... Entities ...
+    foodRef.current.forEach(f => {
+      ctx.fillStyle = f.color;
+      ctx.beginPath(); ctx.arc(f.x, f.y, f.radius, 0, Math.PI * 2); ctx.fill();
+      if (f.isJackpot) { ctx.shadowColor = 'gold'; ctx.shadowBlur = 20; ctx.stroke(); ctx.shadowBlur = 0; }
+    });
+
+    ejectedMassRef.current.forEach(e => {
+      ctx.fillStyle = e.color;
+      ctx.beginPath(); ctx.arc(e.x, e.y, e.radius, 0, Math.PI * 2); ctx.fill();
+    });
+
+    virusesRef.current.forEach(v => {
+      ctx.lineWidth = 4; ctx.fillStyle = '#33ff33'; ctx.strokeStyle = '#22cc22';
+      ctx.beginPath();
+      // ... virus shape ...
+      const spikes = 20;
+      for (let i = 0; i < spikes * 2; i++) {
+        const rot = (Math.PI / spikes) * i;
+        const r = (i % 2 === 0) ? v.radius : v.radius * 0.9;
+        ctx.lineTo(v.x + Math.cos(rot) * r, v.y + Math.sin(rot) * r);
+      }
+      ctx.closePath(); ctx.fill(); ctx.stroke();
+    });
+
+    [...botsRef.current, ...Array.from(otherPlayersRef.current.values()).flatMap(p => p.cells || []), ...myPlayerCellsRef.current].forEach(ent => {
+      if (!ent) return;
+      ctx.beginPath(); ctx.arc(ent.x, ent.y, ent.radius, 0, Math.PI * 2);
+      ctx.fillStyle = ent.color; ctx.fill();
+      ctx.strokeStyle = '#fff'; ctx.lineWidth = 3; ctx.stroke();
+      if (ent.radius > 15) {
+        ctx.fillStyle = 'white'; ctx.strokeStyle = 'black'; ctx.lineWidth = 0.5;
+        ctx.font = `bold ${Math.max(10, ent.radius / 2)}px sans-serif`;
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText(ent.name || '?', ent.x, ent.y);
+      }
+    });
+
+    effects.forEach(ef => {
+      ctx.fillStyle = ef.color || 'white';
+      ctx.font = 'bold 20px Arial';
+      ctx.textAlign = 'center';
+      ctx.fillText(ef.text, ef.x, ef.y - (1.0 - ef.life) * 50);
+      ef.life -= 0.02;
+    });
+
+    ctx.restore();
   };
 
-  const checkLobbyStart = (channel) => {
-    // Must have > 1 player (myself + at least 1 other)
+  const checkLobbyStart = (channel, deltaTime) => {
+    // Must have > 1 player
     if (otherPlayersRef.current.size >= 1 && isReadyRef.current) {
       // Check if ALL others are ready
       let allOthersReady = true;
@@ -355,14 +418,33 @@ export default function GamePage() {
       }
 
       if (allOthersReady) {
-        if (gameStateRef.current !== 'playing') {
-          switchGameState('playing');
-          spawnPlayer();
-          if (gameMode === 'multi') {
-            botsRef.current = [];
-            initWorld(); // Reset food
+        if (!isGameStartingRef.current) {
+          isGameStartingRef.current = true;
+          lobbyTimerRef.current = 3;
+        } else {
+          lobbyTimerRef.current -= (deltaTime / 1000);
+          if (lobbyTimerRef.current <= 0) {
+            if (gameStateRef.current !== 'playing') {
+              switchGameState('playing');
+              spawnPlayer();
+              isGameStartingRef.current = false; // Reset
+              if (gameModeRef.current === 'multi') {
+                botsRef.current = [];
+                initWorld();
+              }
+            }
           }
         }
+      } else {
+        // If someone cancelled ready, abort countdown
+        if (isGameStartingRef.current) {
+          isGameStartingRef.current = false;
+          lobbyTimerRef.current = 3;
+        }
+      }
+    } else {
+      if (isGameStartingRef.current) {
+        isGameStartingRef.current = false;
       }
     }
   };
