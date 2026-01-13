@@ -98,6 +98,14 @@ export default function GamePage() {
     canMerge: true, mergeTimer: 0
   });
 
+  const spawnPlayer = () => {
+    const startName = (nicknameRef.current || '').trim() || `Player ${myId.substr(0, 4)}`;
+    myPlayerCellsRef.current = [createInitialCell(startName)];
+    setScore(0);
+    scoreRef.current = 0;
+    setTimeLeft(GAME_DURATION_SEC);
+  };
+
   useEffect(() => {
     // Mount only ONCE
     const canvas = canvasRef.current;
@@ -154,13 +162,6 @@ export default function GamePage() {
           setTimeLeft(GAME_DURATION_SEC);
           timeLeftRef.current = GAME_DURATION_SEC;
 
-          const spawnPlayer = () => {
-            const startName = (nicknameRef.current || '').trim() || `Player ${myId.substr(0, 4)}`;
-            myPlayerCellsRef.current = [createInitialCell(startName)];
-            setScore(0);
-            scoreRef.current = 0;
-            setTimeLeft(GAME_DURATION_SEC);
-          };
           spawnPlayer();
         } else {
           otherPlayersRef.current.set(id, {
@@ -510,14 +511,6 @@ export default function GamePage() {
     // Determine new state from REF to be safe
     const newState = !isReadyRef.current;
     setIsReadyWrapper(newState);
-  };
-
-  const spawnPlayer = () => {
-    const startName = (nicknameRef.current || '').trim() || `Player ${myId.substr(0, 4)}`;
-    myPlayerCellsRef.current = [createInitialCell(startName)];
-    setScore(0);
-    scoreRef.current = 0;
-    setTimeLeft(GAME_DURATION_SEC);
   };
 
   const splitCells = (dirX, dirY) => {
