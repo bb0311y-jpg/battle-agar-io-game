@@ -262,7 +262,7 @@ export default function GamePage() {
       cancelAnimationFrame(requestRef.current);
       supabase.removeChannel(channel);
     };
-  }, [gameState, isReady, score, nickname]); // Deps for lobby logic
+  }, []); // Mount ONCE. Game loop relies on Refs for state updates.
 
 
   // --- Logic ---
@@ -405,7 +405,9 @@ export default function GamePage() {
 
   // Controls
   const toggleReady = () => {
-    setIsReadyWrapper(!isReady); // use state value as toggle source is fine if sync
+    // Determine new state from REF to be safe
+    const newState = !isReadyRef.current;
+    setIsReadyWrapper(newState);
   };
 
   // (Rest of functions...)
