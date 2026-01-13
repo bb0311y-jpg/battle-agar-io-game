@@ -321,6 +321,61 @@ export default function GamePage() {
     return `${m}:${s < 10 ? '0' : ''}${s}`;
   };
 
+
+  const updateMyCells = (deltaTime) => {
+    const dt = deltaTime / 1000;
+    myPlayerCellsRef.current.forEach(cell => {
+      const dx = cell.targetX - cell.x;
+      const dy = cell.targetY - cell.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      const speed = 200 * Math.pow(cell.radius, -0.4) * 5; // Adjusted speed
+      if (dist > 1) {
+        cell.x += (dx / dist) * speed * dt;
+        cell.y += (dy / dist) * speed * dt;
+      }
+      cell.x = Math.max(0, Math.min(WORLD_WIDTH, cell.x));
+      cell.y = Math.max(0, Math.min(WORLD_HEIGHT, cell.y));
+    });
+  };
+
+  const updateEjectedMass = (deltaTime) => {
+    // Placeholder for mass physics logic
+  };
+
+  const updateBots = (deltaTime) => {
+    // Placeholder for bot logic
+  };
+
+  const updateCamera = () => {
+    if (myPlayerCellsRef.current.length === 0) return;
+    let avgX = 0, avgY = 0;
+    myPlayerCellsRef.current.forEach(c => { avgX += c.x; avgY += c.y; });
+    cameraRef.current = {
+      x: avgX / myPlayerCellsRef.current.length,
+      y: avgY / myPlayerCellsRef.current.length
+    };
+  };
+
+  const checkCollisions = (myId, channel) => {
+    const myCells = myPlayerCellsRef.current;
+    // Food collision
+    for (let i = foodRef.current.length - 1; i >= 0; i--) {
+      const f = foodRef.current[i];
+      for (const cell of myCells) {
+        const dx = cell.x - f.x;
+        const dy = cell.y - f.y;
+        if (dx * dx + dy * dy < cell.radius * cell.radius) {
+          // Eat food
+          cell.radius = Math.sqrt(cell.radius * cell.radius + f.radius * f.radius);
+          foodRef.current.splice(i, 1);
+          // Respawn food? Logic mostly handled by server or simplistic client simulation
+          foodRef.current.push(createFood(f.isJackpot));
+          break;
+        }
+      }
+    }
+  };
+
   // UI Actions
   const handleSinglePlayer = () => {
     setGameMode('single');
