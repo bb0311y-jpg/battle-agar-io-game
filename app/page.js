@@ -58,6 +58,8 @@ export default function GamePage() {
   const timeLeftRef = useRef(GAME_DURATION_SEC);
   const isReadyRef = useRef(false);
   const nicknameRef = useRef('');
+  const scoreRef = useRef(0);
+  const gameModeRef = useRef('single');
 
   // Helper to switch state cleanly
   const switchGameState = (newState) => {
@@ -74,6 +76,11 @@ export default function GamePage() {
   const setIsReadyWrapper = (val) => {
     setIsReady(val);
     isReadyRef.current = val;
+  };
+
+  const setGameModeWrapper = (mode) => {
+    setGameMode(mode);
+    gameModeRef.current = mode;
   };
 
   // --- Initialization ---
@@ -134,7 +141,7 @@ export default function GamePage() {
       .on('broadcast', { event: 'player_update' }, (payload) => {
         const { id, cells, score, name } = payload.payload;
         if (id !== myId) {
-          otherPlayersRef.current.set(id, { id, cells, score, name, lastUpdate: Date.now() });
+          otherPlayersRef.current.set(id, { id, cells, score, name: name || 'Unknown', lastUpdate: Date.now() });
         }
       })
       .on('broadcast', { event: 'lobby_update' }, (payload) => {
@@ -145,11 +152,17 @@ export default function GamePage() {
           setTimeLeft(GAME_DURATION_SEC);
           timeLeftRef.current = GAME_DURATION_SEC;
 
-          const startName = name || `Player ${myId.substr(0, 4)}`; // Name might be lost in closure if not careful, but spawnPlayer fixes this
+          const spawnPlayer = () => {
+            const startName = (nicknameRef.current || '').trim() || `Player ${myId.substr(0, 4)}`;
+            myPlayerCellsRef.current = [createInitialCell(startName)];
+            setScore(0);
+            scoreRef.current = 0;
+            setTimeLeft(GAME_DURATION_SEC);
+          };
           spawnPlayer();
         } else {
           otherPlayersRef.current.set(id, {
-            id, name, ready, lastUpdate: Date.now(),
+            id, name: name || 'Unknown', ready, lastUpdate: Date.now(),
             cells: []
           });
         }
@@ -169,85 +182,87 @@ export default function GamePage() {
     let jackpotTimer = 0;
 
     const animate = (time) => {
-      const deltaTime = time - lastTime;
-      lastTime = time;
+      try {
+        const deltaTime = time - lastTime;
+        lastTime = time;
 
-      const currentGS = gameStateRef.current;
+        const currentGS = gameStateRef.current;
 
-      if (currentGS === 'playing') {
-        updateMyCells(deltaTime);
-        updateEjectedMass(deltaTime);
-        updateBots(deltaTime);
-        checkCollisions(myId, channel); // Changed 'id' to 'myId'
-        recalcScore();
-        updateCamera();
+        if (currentGS === 'playing') {
+          updateMyCells(deltaTime);
+          updateEjectedMass(deltaTime);
+          updateBots(deltaTime);
+          checkCollisions(myId, channel);
+          recalcScore();
+          updateCamera();
 
-        setEffects(prev => prev.filter(e => e.life > 0).map(e => ({ ...e, life: e.life - 0.02 })));
+          setEffects(prev => prev.filter(e => e.life > 0).map(e => ({ ...e, life: e.life - 0.02 })));
 
-        jackpotTimer += deltaTime;
-        if (jackpotTimer > 15000) {
-          if (Math.random() < 0.8) {
-            spawnJackpot();
-            showNotification("🎰 JACKPOT ORB SPAWNED! 🎰");
+          jackpotTimer += deltaTime;
+          if (jackpotTimer > 15000) {
+            if (Math.random() < 0.8) {
+              spawnJackpot();
+              showNotification("🎰 JACKPOT ORB SPAWNED! 🎰");
+            }
+            jackpotTimer = 0;
           }
-          jackpotTimer = 0;
+        } else if (currentGS === 'lobby') {
+          if (time - lastBroadcastTime > 1000) {
+            const myName = `Player ${myId.substr(0, 4)}`;
+            channel.send({
+              type: 'broadcast', event: 'lobby_update',
+              payload: { id: myId, name: nicknameRef.current || myName, ready: isReadyRef.current }
+            });
+            lastBroadcastTime = time;
+          }
+          checkLobbyStart(channel);
+          setDebugInfo(prev => ({ ...prev, tick: (prev.tick || 0) + 1 }));
         }
-      } else if (currentGS === 'lobby') {
-        if (time - lastBroadcastTime > 1000) {
-          const myName = `Player ${myId.substr(0, 4)}`; // Keep simple for lobby sync in loop
+
+        if (currentGS === 'playing' && time - lastBroadcastTime > 50) {
           channel.send({
-            type: 'broadcast', event: 'lobby_update',
-            payload: { id: myId, name: nicknameRef.current || myName, ready: isReadyRef.current }
+            type: 'broadcast', event: 'player_update',
+            payload: {
+              id: myId,
+              score: scoreRef.current, // Use Score Ref!
+              name: nicknameRef.current || `Player ${myId.substr(0, 4)}`,
+              cells: myPlayerCellsRef.current.map(c => ({
+                id: c.id, x: Math.round(c.x), y: Math.round(c.y),
+                radius: c.radius, color: c.color, name: c.name
+              }))
+            },
           });
           lastBroadcastTime = time;
         }
-        checkLobbyStart(channel);
-        // Force render for lobby counts
-        setDebugInfo(prev => ({ ...prev, tick: (prev.tick || 0) + 1 }));
-      }
 
-      if (currentGS === 'playing' && time - lastBroadcastTime > 50) {
-        channel.send({
-          type: 'broadcast', event: 'player_update',
-          payload: {
-            id: myId,
-            score: 0, // recalcScore updates state, but difficult to read state inside loop?
-            // Actually score matches radius sum.
-            name: nicknameRef.current || `Player ${myId.substr(0, 4)}`,
-            cells: myPlayerCellsRef.current.map(c => ({
-              id: c.id, x: Math.round(c.x), y: Math.round(c.y),
-              radius: c.radius, color: c.color, name: c.name
-            }))
-          },
-        });
-        lastBroadcastTime = time;
-      }
-
-      // Cleanup
-      const now = Date.now();
-      for (const [pid, p] of otherPlayersRef.current.entries()) {
-        if (now - p.lastUpdate > 3000) otherPlayersRef.current.delete(pid);
-      }
-
-      if (currentGS === 'playing' || currentGS === 'gameover' || currentGS === 'lobby') {
-        draw(ctx, canvas, currentGS);
-      }
-
-      // Timer & Stats
-      frameCount++;
-      if (time - lastFpsTime >= 1000) {
-        setDebugInfo({ fps: frameCount, players: otherPlayersRef.current.size + 1 });
-        updateLeaderboard();
-
-        if (currentGS === 'playing') {
-          timeLeftRef.current -= 1;
-          setTimeLeft(timeLeftRef.current);
-          if (timeLeftRef.current <= 0) {
-            switchGameState('gameover');
-          }
+        // Cleanup
+        const now = Date.now();
+        for (const [pid, p] of otherPlayersRef.current.entries()) {
+          if (now - p.lastUpdate > 3000) otherPlayersRef.current.delete(pid);
         }
-        frameCount = 0;
-        lastFpsTime = time;
+
+        if (currentGS === 'playing' || currentGS === 'gameover' || currentGS === 'lobby') {
+          draw(ctx, canvas, currentGS);
+        }
+
+        // Timer & Stats
+        frameCount++;
+        if (time - lastFpsTime >= 1000) {
+          setDebugInfo({ fps: frameCount, players: otherPlayersRef.current.size + 1 });
+          updateLeaderboard();
+
+          if (currentGS === 'playing') {
+            timeLeftRef.current -= 1;
+            setTimeLeft(timeLeftRef.current);
+            if (timeLeftRef.current <= 0) {
+              switchGameState('gameover');
+            }
+          }
+          frameCount = 0;
+          lastFpsTime = time;
+        }
+      } catch (err) {
+        console.error("Game Loop Error:", err);
       }
 
       requestRef.current = requestAnimationFrame(animate);
@@ -279,19 +294,24 @@ export default function GamePage() {
     botsRef.current = []; // Filled if single player
   };
 
+  const recalcScore = () => {
+    let s = 0;
+    myPlayerCellsRef.current.forEach(c => s += c.radius);
+    s = Math.floor(s);
+    setScore(s);
+    scoreRef.current = s;
+  };
+
   const updateLeaderboard = () => {
     const all = [];
     // Me
-    all.push({ name: nickname || "Me", score: score, isMe: true });
+    all.push({ name: nicknameRef.current || "Me", score: scoreRef.current, isMe: true });
     // Others
     otherPlayersRef.current.forEach(p => {
       let s = p.score || 0;
       if (!s && p.cells) s = Math.floor(p.cells.reduce((a, c) => a + c.radius, 0));
-      all.push({ name: p.name || "Enemy", score: s, isMe: false });
+      all.push({ name: String(p.name || "Enemy"), score: s, isMe: false });
     });
-    // Bots
-    // Bots usually don't have score tracked specifically, but we can approx by radius
-    // Let's exclude bots from leaderboard to keep it 'Player' focused, or add huge ones.
 
     all.sort((a, b) => b.score - a.score);
     setLeaderboard(all.slice(0, 5));
