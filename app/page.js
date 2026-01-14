@@ -97,7 +97,8 @@ export default function GamePage() {
     color: `hsl(${Math.random() * 360}, 70%, 50%)`,
     targetX: 0, targetY: 0,
     name: name,
-    canMerge: true, mergeTimer: 0
+    canMerge: true, mergeTimer: 0,
+    boostX: 0, boostY: 0
   });
 
   const spawnPlayer = () => {
@@ -332,50 +333,153 @@ export default function GamePage() {
     if (!mouseRef.current) return;
 
     // Calculate World Mouse Position
-    // Screen Mouse (0,0 is top left of browser) -> World Mouse
     const screenX = mouseRef.current.x;
     const screenY = mouseRef.current.y;
-
-    // We assume canvas covers whole window
     const halfW = window.innerWidth / 2;
     const halfH = window.innerHeight / 2;
-
     const mouseWorldX = screenX - halfW + cam.x;
     const mouseWorldY = screenY - halfH + cam.y;
 
-    myPlayerCellsRef.current.forEach(cell => {
+    const myCells = myPlayerCellsRef.current;
+
+    // 1. Move cells towards mouse (Base Movement)
+    // 2. Apply Boost (Physics Impulse)
+    // 3. Collision with Walls
+    // 4. Merge Logic (Optional basic implementation)
+
+    myCells.forEach(cell => {
+      // --- Base Movement ---
       const dx = mouseWorldX - cell.x;
       const dy = mouseWorldY - cell.y;
       const dist = Math.sqrt(dx * dx + dy * dy);
-      const speed = 200 * Math.pow(cell.radius, -0.4) * 8; // Adjusted speed factor
+      const speed = 200 * Math.pow(cell.radius, -0.4) * 8;
 
-      if (dist > 5) { // Deadzone
+      if (dist > 5) {
         cell.x += (dx / dist) * speed * dt;
         cell.y += (dy / dist) * speed * dt;
       }
 
-      // Bounds
-      cell.x = Math.max(0, Math.min(WORLD_WIDTH, cell.x));
-      cell.y = Math.max(0, Math.min(WORLD_HEIGHT, cell.y));
+      // --- Apply Boost/Impulse ---
+      if (Math.abs(cell.boostX) > 0.1 || Math.abs(cell.boostY) > 0.1) {
+        cell.x += cell.boostX * dt;
+        cell.y += cell.boostY * dt;
+        // Friction
+        const friction = 0.92;
+        cell.boostX *= friction;
+        cell.boostY *= friction;
+      }
+
+      // --- Wall Collisions ---
+      cell.x = Math.max(cell.radius, Math.min(WORLD_WIDTH - cell.radius, cell.x));
+      cell.y = Math.max(cell.radius, Math.min(WORLD_HEIGHT - cell.radius, cell.y));
+
+      // --- Merge CD ---
+      if (!cell.canMerge) {
+        cell.mergeTimer += dt;
+        if (cell.mergeTimer > 15 + (cell.radius * 0.2)) { // Cooldown based on size
+          cell.canMerge = true;
+        }
+      }
     });
+
+    // --- Simple Cell-Cell Collision (Push apart overlap if not merging) ---
+    for (let i = 0; i < myCells.length; i++) {
+      for (let j = i + 1; j < myCells.length; j++) {
+        const c1 = myCells[i];
+        const c2 = myCells[j];
+        const dx = c1.x - c2.x;
+        const dy = c1.y - c2.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        const minDist = c1.radius + c2.radius;
+
+        if (dist < minDist && dist > 0) {
+          // Determine merge or push
+          // For now, just push apart slightly to prevent stacking
+          const overlap = minDist - dist;
+          const pushX = (dx / dist) * overlap * 0.1; // Soft push
+          const pushY = (dy / dist) * overlap * 0.1;
+
+          c1.x += pushX;
+          c1.y += pushY;
+          c2.x -= pushX;
+          c2.y -= pushY;
+        }
+      }
+    }
   };
 
   const updateEjectedMass = (deltaTime) => {
-    // Placeholder for mass physics logic
+    const dt = deltaTime / 1000;
+    // Move ejected mass
+    for (let i = ejectedMassRef.current.length - 1; i >= 0; i--) {
+      const mass = ejectedMassRef.current[i];
+      if (Math.abs(mass.vx) > 0.1 || Math.abs(mass.vy) > 0.1) {
+        mass.x += mass.vx * dt;
+        mass.y += mass.vy * dt;
+        mass.vx *= 0.9;
+        mass.vy *= 0.9;
+      }
+    }
   };
 
   const updateBots = (deltaTime) => {
-    // Placeholder for bot logic
+    const dt = deltaTime / 1000;
+    botsRef.current.forEach(bot => {
+      // Simple AI: Move to target, change target if reached
+      const dx = bot.targetX - bot.x;
+      const dy = bot.targetY - bot.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+
+      if (dist < 10 || bot.changeDirTimer > 5) {
+        bot.targetX = Math.random() * WORLD_WIDTH;
+        bot.targetY = Math.random() * WORLD_HEIGHT;
+        bot.changeDirTimer = 0;
+      }
+
+      const speed = 200 * Math.pow(bot.radius, -0.4) * 5; // Bot speed
+      bot.x += (dx / dist) * speed * dt;
+      bot.y += (dy / dist) * speed * dt;
+
+      bot.x = Math.max(0, Math.min(WORLD_WIDTH, bot.x));
+      bot.y = Math.max(0, Math.min(WORLD_HEIGHT, bot.y));
+
+      bot.changeDirTimer += dt;
+
+      // Very basic flee behavior: If near a large player, run away!
+      // (Simplified for performance)
+    });
   };
 
   const updateCamera = () => {
-    if (myPlayerCellsRef.current.length === 0) return;
-    let avgX = 0, avgY = 0;
-    myPlayerCellsRef.current.forEach(c => { avgX += c.x; avgY += c.y; });
-    cameraRef.current = {
-      x: avgX / myPlayerCellsRef.current.length,
-      y: avgY / myPlayerCellsRef.current.length
-    };
+    if (myPlayerCellsRef.current.length > 0) {
+      let avgX = 0, avgY = 0;
+      myPlayerCellsRef.current.forEach(c => { avgX += c.x; avgY += c.y; });
+      cameraRef.current = {
+        x: avgX / myPlayerCellsRef.current.length,
+        y: avgY / myPlayerCellsRef.current.length
+      };
+    } else {
+      // Spectate Mode: Follow top player
+      if (leaderboard.length > 0 && otherPlayersRef.current.size > 0) {
+        // Find leader (who is not me)
+        const leaderName = leaderboard[0].name;
+        // Find player obj from ref
+        for (const p of otherPlayersRef.current.values()) {
+          if (p.name === leaderName && p.cells && p.cells.length > 0) {
+            // Calculate center
+            let lx = 0, ly = 0;
+            p.cells.forEach(c => { lx += c.x; ly += c.y; });
+            cameraRef.current = {
+              x: lx / p.cells.length,
+              y: ly / p.cells.length
+            };
+            return;
+          }
+        }
+      }
+      // Fallback or Free Roam center?
+      // Keep current camera if no target found
+    }
   };
 
   const checkCollisions = (myId, channel) => {
@@ -393,6 +497,26 @@ export default function GamePage() {
           // Respawn food? Logic mostly handled by server or simplistic client simulation
           foodRef.current.push(createFood(f.isJackpot));
           break;
+        }
+      }
+    }
+
+    // Ejected Mass collision
+    for (let i = ejectedMassRef.current.length - 1; i >= 0; i--) {
+      const m = ejectedMassRef.current[i];
+      for (const cell of myCells) {
+        const dx = cell.x - m.x;
+        const dy = cell.y - m.y;
+        // Eat if overlapping
+        if (dx * dx + dy * dy < cell.radius * cell.radius) {
+          // Prevent instant self-eating by checking speed or time?
+          // Simple speed check:
+          if (Math.abs(m.vx) < 100 && Math.abs(m.vy) < 100) {
+            const newArea = cell.radius * cell.radius + m.radius * m.radius;
+            cell.radius = Math.sqrt(newArea);
+            ejectedMassRef.current.splice(i, 1);
+            break;
+          }
         }
       }
     }
@@ -439,7 +563,101 @@ export default function GamePage() {
   };
 
   const splitCells = (dirX, dirY) => {
-    // TODO: Implement split logic
+    const myCells = myPlayerCellsRef.current;
+    if (myCells.length >= 16) return; // Max 16 cells
+
+    const newCells = [];
+    const cam = cameraRef.current;
+    const halfW = window.innerWidth / 2;
+    const halfH = window.innerHeight / 2;
+    // Current world mouse
+    const mX = mouseRef.current.x - halfW + cam.x;
+    const mY = mouseRef.current.y - halfH + cam.y;
+
+    myCells.forEach(cell => {
+      if (cell.radius < 35) {
+        newCells.push(cell); // Too small to split
+        return;
+      }
+
+      // Split!
+      const newRadius = cell.radius / 1.414; // Area/2
+      cell.radius = newRadius;
+
+      // Direction towards mouse
+      let dx = mX - cell.x;
+      let dy = mY - cell.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist === 0) { dx = 1; dy = 0; }
+      else { dx /= dist; dy /= dist; }
+
+      // Create Split Cell
+      const splitDist = newRadius * 2; // Spawn slight ahead
+      const splitCell = {
+        ...createInitialCell(cell.name),
+        id: 'c_' + Math.random().toString(36).substr(2, 9),
+        x: cell.x + dx * splitDist,
+        y: cell.y + dy * splitDist,
+        radius: newRadius,
+        color: cell.color,
+        boostX: dx * 800, // Impulse speed
+        boostY: dy * 800,
+        canMerge: false,
+        mergeTimer: 0
+      };
+
+      newCells.push(cell);
+      newCells.push(splitCell);
+    });
+
+    myPlayerCellsRef.current = newCells;
+  };
+
+  const ejectMass = () => {
+    const myCells = myPlayerCellsRef.current;
+    const cam = cameraRef.current;
+    const halfW = window.innerWidth / 2;
+    const halfH = window.innerHeight / 2;
+    const mX = mouseRef.current.x - halfW + cam.x;
+    const mY = mouseRef.current.y - halfH + cam.y;
+
+    myCells.forEach(cell => {
+      if (cell.radius < 30) return; // Too small
+
+      const loss = 10; // Mass loss
+      // New radius from area
+      // AreaOld = PI*r^2. AreaNew = AreaOld - LossArea.
+      // Simplified: just radius reduction approximation for gameplay feel
+      // mass ~ r^2. 
+      const oldMass = cell.radius * cell.radius;
+      const newMass = oldMass - 100; // Deduct 100 mass units (approx r=10)
+      if (newMass <= 0) return;
+
+      cell.radius = Math.sqrt(newMass);
+
+      let dx = mX - cell.x;
+      let dy = mY - cell.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist === 0) { dx = 1; dy = 0; } else { dx /= dist; dy /= dist; }
+
+      // Spawn Mass
+      const massObj = {
+        x: cell.x + dx * cell.radius,
+        y: cell.y + dy * cell.radius,
+        vx: dx * 800,
+        vy: dy * 800,
+        radius: 8,
+        color: cell.color
+      };
+      ejectedMassRef.current.push(massObj);
+
+      if (gameModeRef.current === 'multi') {
+        channelRef.current?.send({
+          type: 'broadcast', event: 'mass_ejected',
+          payload: massObj
+        });
+      }
+    });
   };
 
   useEffect(() => {
@@ -515,6 +733,10 @@ export default function GamePage() {
       })
       .on('broadcast', { event: 'player_death' }, (payload) => {
         otherPlayersRef.current.delete(payload.payload.id);
+      })
+      .on('broadcast', { event: 'mass_ejected' }, (payload) => {
+        const { x, y, vx, vy, color, radius } = payload.payload;
+        ejectedMassRef.current.push({ x, y, vx, vy, color, radius, life: 1.0 }); // Add life if needed, or simple push
       })
       .subscribe();
 
@@ -703,6 +925,20 @@ export default function GamePage() {
           <h1 style={{ color: 'red', fontSize: '3rem' }}>GAME OVER</h1>
           <h2>Final Score: {Math.round(score)}</h2>
           <button onClick={() => switchGameState('menu')} style={btnStyle}>MAIN MENU</button>
+
+          <div style={{ marginTop: '20px', display: 'flex', gap: '20px' }}>
+            <button onClick={() => {
+              spawnPlayer();
+              switchGameState('playing');
+            }} style={{ ...btnStyle, background: '#444' }}>RESPAWN</button>
+
+            <button onClick={() => {
+              setScore(0);
+              myPlayerCellsRef.current = []; // Ensure dead
+              switchGameState('playing');
+              showNotification("Spectating Mode");
+            }} style={{ ...btnStyle, background: '#666' }}>SPECTATE</button>
+          </div>
         </div>
       )}
     </div>
