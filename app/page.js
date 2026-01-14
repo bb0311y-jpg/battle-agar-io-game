@@ -130,6 +130,20 @@ export default function GamePage() {
     if (gameModeRef.current === 'single') {
       botsRef.current = [];
       for (let i = 0; i < 20; i++) spawnBot();
+
+      // Trigger Loading Screen for Single Player Start
+      setIsLoading(true);
+      setLoadingProgress(0);
+      const loadInterval = setInterval(() => {
+        setLoadingProgress(prev => {
+          if (prev >= 100) {
+            clearInterval(loadInterval);
+            setIsLoading(false);
+            return 100;
+          }
+          return prev + 10;
+        });
+      }, 100);
     }
     hasDiedRef.current = false;
   };
@@ -241,9 +255,17 @@ export default function GamePage() {
     if (sz) {
       ctx.beginPath();
       ctx.arc(sz.x, sz.y, sz.radius, 0, Math.PI * 2);
-      ctx.strokeStyle = sz.radius < 4000 ? 'rgba(255, 0, 0, 0.5)' : 'rgba(0, 255, 0, 0.1)'; // Red if shrinking, Green hint if full
-      ctx.lineWidth = sz.radius < 4000 ? 20 : 5;
+      ctx.strokeStyle = sz.radius < 4000 ? 'rgba(255, 0, 0, 0.5)' : 'rgba(0, 255, 0, 0.15)'; // Red if shrinking, Green hint if full
+      ctx.lineWidth = sz.radius < 4000 ? 20 : 10; // Thicker green hint
       ctx.stroke();
+
+      // Debug Text for Safe Zone
+      if (sz.radius >= 4000 && mouseRef.current) {
+        // Show hint only near mouse or center? 
+        // ctx.fillStyle = 'rgba(0, 255, 0, 0.3)';
+        // ctx.font = '20px Arial';
+        // ctx.fillText("SAFE ZONE ACTIVE", sz.x, sz.y - sz.radius + 50);
+      }
     }
 
     // ... Entities ...
@@ -991,17 +1013,17 @@ useEffect(() => {
   const canvas = canvasRef.current;
   const ctx = canvas.getContext('2d');
 
-  // Simulated Loading Sequence
-  const loadInterval = setInterval(() => {
+  // Page Load one-time
+  const initialLoad = setInterval(() => {
     setLoadingProgress(prev => {
       if (prev >= 100) {
-        clearInterval(loadInterval);
+        clearInterval(initialLoad);
         setIsLoading(false);
         return 100;
       }
-      return prev + 10;
+      return prev + 20; // Faster initial load
     });
-  }, 100);
+  }, 50);
 
   let mouseX = 0;
   let mouseY = 0;
