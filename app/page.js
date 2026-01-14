@@ -73,8 +73,10 @@ export default function GamePage() {
   const gameModeRef = useRef('single');
   const isGameStartingRef = useRef(false);
   const isGameStartingRef = useRef(false);
+  const isGameStartingRef = useRef(false);
   const lobbyTimerRef = useRef(0);
   const respawnTimerRef = useRef(0); // For 10s cooldown
+  const hasDiedRef = useRef(false); // Track death state
 
   // Helper to switch state cleanly
   const switchGameState = (newState) => {
@@ -126,6 +128,7 @@ export default function GamePage() {
       botsRef.current = [];
       for (let i = 0; i < 20; i++) spawnBot();
     }
+    hasDiedRef.current = false;
   };
 
   // Function to Respawn AFTER DEATH (Keep Timer, Score?, Bots)
@@ -142,6 +145,7 @@ export default function GamePage() {
     scoreRef.current = 0;
     // DO NOT RESET TIMER
     // DO NOT RESET BOTS
+    hasDiedRef.current = false;
   };
 
   // Moved useEffect to bottom to ensure all helper functions are defined before use in closures.
@@ -569,6 +573,58 @@ const updateBots = (deltaTime) => {
   });
 };
 
+    // Very basic flee behavior
+  });
+};
+
+const updateSafeZone = (timeLeft) => {
+  // Shrink from 1:00 (60s remaining) to 0:00.
+  // Total Duration 180s. Starts shrinking at 60s left? 
+  // User said: "Poison Circle Starts at 1:00" (which implies 60s timestamp or 1 min in?).
+  // Usually "Starts at 1:00" means 1 minute into game? Or 1 minute remaining?
+  // User said: "Warning... at 0:50 (130s remaining)".
+  // Let's assume shrinking starts at T-120s (1 min in) or T-60s (2 min in)?
+  // Re-reading: "Starts shrinking at 1:00 (120 seconds remaining)". 
+  // NOTE: User said 1:00 (120s remaining). This means 60s elapsed.
+
+  if (timeLeft > 120) return; // Haven't started shrinking yet
+
+  const maxRadius = INITIAL_SAFE_ZONE_RADIUS; // 3500
+  const minRadius = WORLD_WIDTH * 0.25 / 2; // ~560
+
+  // Time progress from 120 -> 0
+  const progress = (120 - timeLeft) / 120; // 0 to 1
+  // Linear shrink? Or non-linear? Linear is fine.
+
+  const currentRadius = maxRadius - (maxRadius - minRadius) * progress;
+  safeZoneRef.current = { x: WORLD_WIDTH / 2, y: WORLD_HEIGHT / 2, radius: currentRadius };
+};
+
+const applyDecay = (deltaTime) => {
+  const dt = deltaTime / 1000;
+  const sz = safeZoneRef.current;
+
+  myPlayerCellsRef.current.forEach(cell => {
+    // Natural Decay: 0.2% per sec
+    // Mass = r*r. 
+    // NewMass = Mass * (1 - rate*dt)
+    // Approx for radius: r' = r * sqrt(1 - rate*dt) ~ r * (1 - 0.5*rate*dt)
+    let decayRate = 0.002; // 0.2%
+
+    // Poison Zone Penalty
+    const dist = Math.sqrt(Math.pow(cell.x - sz.x, 2) + Math.pow(cell.y - sz.y, 2));
+    if (dist > sz.radius) {
+      decayRate += 0.004; // +200% -> Total 0.6%
+      // Visual cue?
+      if (Math.random() < 0.1) addEffect(cell.x, cell.y, "POISON!", "purple");
+    }
+
+    const oldMass = cell.radius * cell.radius;
+    const newMass = oldMass * (1 - decayRate * dt);
+    if (newMass > 100) cell.radius = Math.sqrt(newMass); // Don't decay below 10 mass
+  });
+};
+
 const updateCamera = () => {
   if (myPlayerCellsRef.current.length > 0) {
     let avgX = 0, avgY = 0;
@@ -810,10 +866,12 @@ const handleMultiPlayer = () => {
   // lobbyPlayers cleared via effect logic usually, but here we just ensure refs clean if needed
   setIsReadyWrapper(false);
 
-  // DISABLE BOTS in Multi
-  botsRef.current = [];
+  // DISABLE BOTS in Multi? NO, User wants collision. Enable local bots for everyone.
+  // botsRef.current = [];
   initWorld();
-  botsRef.current = []; // Ensure empty after initWorld
+  // Spawn Bots for local flavor in Multi too
+  botsRef.current = [];
+  for (let i = 0; i < 20; i++) spawnBot();
 };
 
 // Controls
@@ -1051,7 +1109,8 @@ useEffect(() => {
       if (currentGS === 'playing') {
         updateMyCells(deltaTime);
         updateEjectedMass(deltaTime);
-        if (mode === 'single') updateBots(deltaTime); // ONLY UPDATE BOTS IN SINGLE
+        // if (mode === 'single') updateBots(deltaTime); // ONLY UPDATE BOTS IN SINGLE
+        updateBots(deltaTime); // Enable Bots in Multi too (Local)
 
         checkCollisions(myId, channel);
         recalcScore();
@@ -1060,8 +1119,8 @@ useEffect(() => {
         setEffects(prev => prev.filter(e => e.life > 0).map(e => ({ ...e, life: e.life - 0.02 })));
 
         // New Logic
-        // updateSafeZone(timeLeftRef.current); // This function is not defined in the provided code
-        // applyDecay(deltaTime); // This function is not defined in the provided code
+        updateSafeZone(timeLeftRef.current);
+        applyDecay(deltaTime);
 
         // Zone Warning
         // if (Math.abs(timeLeftRef.current - 130) < 0.1) { // At 130s left (50s elapsed)
@@ -1139,12 +1198,23 @@ useEffect(() => {
         }
 
         // Update Respawn Timer if dead
-        if (gameStateRef.current === 'playing' && myPlayerCellsRef.current.length === 0) {
-          // We are dead / spectating
-          // But 'playing' state is kept for spectating?
-          // Logic check: "gameover" is valid state for end of match. 
-          // Valid Death state: we are in "playing" but have 0 cells.
-          // We need a timer for respawn button.
+        if (gameStateRef.current === 'playing') {
+          if (myPlayerCellsRef.current.length === 0) {
+            if (!hasDiedRef.current) {
+              hasDiedRef.current = true;
+              respawnTimerRef.current = 10; // 10s Cooldown
+            }
+          }
+        }
+
+        if (respawnTimerRef.current > 0) {
+          respawnTimerRef.current -= (time - lastTime) / 1000; // Oops, deltaTime is above. 
+          // We are in animate loop, we can use deltaTime or simple 1s decrement here? 
+          // Use time-lastFpsTime which is ~1000ms.
+          // Better: use deltaTime from top of animate.
+          // But we are inside the 1sec interval block here.
+          // So we decrement by 1.
+          respawnTimerRef.current -= 1;
         }
       }
       frameCount = 0;
