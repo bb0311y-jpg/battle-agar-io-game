@@ -207,16 +207,12 @@ export default function GamePage() {
 
     // Draw Safe Zone
     const sz = safeZoneRef.current;
-    if (sz.radius < 4000) { // Only draw if shrinking has started/is relevant
+    if (sz) {
       ctx.beginPath();
       ctx.arc(sz.x, sz.y, sz.radius, 0, Math.PI * 2);
-      ctx.strokeStyle = 'rgba(255, 0, 0, 0.5)';
-      ctx.lineWidth = 20;
+      ctx.strokeStyle = sz.radius < 4000 ? 'rgba(255, 0, 0, 0.5)' : 'rgba(0, 255, 0, 0.1)'; // Red if shrinking, Green hint if full
+      ctx.lineWidth = sz.radius < 4000 ? 20 : 5;
       ctx.stroke();
-      // Draw warning text if shrinking
-      if (timeLeftRef.current > 120 && timeLeftRef.current < 130) {
-        // Flashing warning? handled via UI mostly but can add world text
-      }
     }
 
     // ... Entities ...
@@ -545,8 +541,7 @@ const updateBots = (deltaTime) => {
 
     bot.changeDirTimer += dt;
 
-    // Very basic flee behavior: If near a large player, run away!
-    // (Simplified for performance)
+    // Very basic flee behavior
   });
 };
 
@@ -719,9 +714,14 @@ const checkCollisions = (myId, channel) => {
         const dy = cell.y - enemyCell.y;
         const dist = Math.sqrt(dx * dx + dy * dy);
 
-        // Rule: Must be 20% bigger
-        if (cell.radius > enemyCell.radius * 1.2 && dist < cell.radius - enemyCell.radius * 0.4) {
-          // EAT (Gain 50% Mass)
+        // Relaxed Collision Rule for PvP:
+        // Must be 10% bigger (1.1x)
+        // Dist < radius (touching center? No, overlap).
+        // Center of enemy inside My Radius?
+        // dist < cell.radius - enemyCell.radius * 0.2
+
+        if (cell.radius > enemyCell.radius * 1.1 && dist < cell.radius - enemyCell.radius * 0.2) {
+          // EAT
           const gain = (enemyCell.radius * enemyCell.radius) * 0.5;
           const newArea = cell.radius * cell.radius + gain;
           cell.radius = Math.sqrt(newArea);
@@ -760,7 +760,10 @@ const handleSinglePlayer = () => {
   setGameMode('single');
   switchGameState('playing');
   initWorld();
-  for (let i = 0; i < 15; i++) spawnBot();
+  // Clear other players just in case
+  otherPlayersRef.current.clear();
+  // Bots ON
+  for (let i = 0; i < 20; i++) spawnBot();
   spawnPlayer();
 };
 
@@ -785,7 +788,15 @@ const handleMultiPlayer = () => {
   switchGameState('lobby');
   // lobbyPlayers cleared via effect logic usually, but here we just ensure refs clean if needed
   setIsReadyWrapper(false);
+
+  // DISABLE BOTS in Multi
+  botsRef.current = [];
+  // Clear world? No, initWorld will reset food/virus.
+  // Sync issues: Client A and Client B init world differently?
+  // In P2P/Serverless, usually one holds truth or we live with diff food.
+  // For now, re-init world is safer for fresh start.
   initWorld();
+  botsRef.current = []; // Ensure empty after initWorld
 };
 
 // Controls
@@ -930,6 +941,9 @@ useEffect(() => {
 
   channel
     .on('broadcast', { event: 'player_update' }, (payload) => {
+      // Isolation: If Single Player, IGNORE network
+      if (gameModeRef.current === 'single') return;
+
       const { id, cells, score, name } = payload.payload;
       if (id !== myId) {
         const prev = otherPlayersRef.current.get(id) || {};
@@ -949,6 +963,8 @@ useEffect(() => {
       }
     })
     .on('broadcast', { event: 'lobby_update' }, (payload) => {
+      if (gameModeRef.current === 'single') return; // Ignore in single player
+
       const { id, name, ready, status } = payload.payload;
       if (status === 'start_game') {
         otherPlayersRef.current.forEach(p => p.cells = []);
@@ -965,13 +981,16 @@ useEffect(() => {
       }
     })
     .on('broadcast', { event: 'player_death' }, (payload) => {
+      if (gameModeRef.current === 'single') return; // Ignore in single player
       otherPlayersRef.current.delete(payload.payload.id);
     })
     .on('broadcast', { event: 'mass_ejected' }, (payload) => {
+      if (gameModeRef.current === 'single') return; // Ignore in single player
       const { x, y, vx, vy, color, radius } = payload.payload;
       ejectedMassRef.current.push({ x, y, vx, vy, color, radius, life: 1.0 });
     })
     .on('broadcast', { event: 'cells_eaten' }, (payload) => {
+      if (gameModeRef.current === 'single') return; // Ignore in single player
       // If I am the target, I lost cells!
       if (payload.payload.targetId === myId) {
         const indices = payload.payload.indices;
@@ -980,8 +999,6 @@ useEffect(() => {
         // Safer to match by ID if we had cell IDs. We do! c.id
         // But 'indices' sent from attacker is based on their snapshot.
         // Quick fix: attacker sends cell IDs or we just pop simplisticly?
-        // Since we lack robust ID syncing in 'otherPlayers' ref (we reset cells often), 
-        // let's just accept "Death" if we are small, or random cell loss.
         // BETTER: just remove N cells.
 
         // Actually, if I lose all cells, I die.
@@ -1012,11 +1029,13 @@ useEffect(() => {
       lastTime = time;
 
       const currentGS = gameStateRef.current;
+      const mode = gameModeRef.current;
 
       if (currentGS === 'playing') {
         updateMyCells(deltaTime);
         updateEjectedMass(deltaTime);
-        updateBots(deltaTime);
+        if (mode === 'single') updateBots(deltaTime); // ONLY UPDATE BOTS IN SINGLE
+
         checkCollisions(myId, channel);
         recalcScore();
         updateCamera();
@@ -1053,12 +1072,14 @@ useEffect(() => {
         setDebugInfo(prev => ({ ...prev, tick: (prev.tick || 0) + 1 }));
       }
 
-      if (currentGS === 'playing' && time - lastBroadcastTime > 50) {
+
+      // Broadcast ONLY in Multi
+      if (mode === 'multi' && currentGS === 'playing' && time - lastBroadcastTime > 50) {
         channel.send({
           type: 'broadcast', event: 'player_update',
           payload: {
             id: myId,
-            score: scoreRef.current, // Use Score Ref!
+            score: scoreRef.current,
             name: nicknameRef.current || `Player ${myId.substr(0, 4)}`,
             cells: myPlayerCellsRef.current.map(c => ({
               id: c.id, x: Math.round(c.x), y: Math.round(c.y),
