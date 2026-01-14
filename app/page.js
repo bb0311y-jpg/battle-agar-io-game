@@ -39,6 +39,9 @@ export default function GamePage() {
   const [isReady, setIsReady] = useState(false);
   // lobbyPlayers state removed (using otherPlayersRef)
 
+  const [isLoading, setIsLoading] = useState(true); // Mask initial lag
+  const [loadingProgress, setLoadingProgress] = useState(0);
+
   // World State
   const myPlayerCellsRef = useRef([]);
   const cameraRef = useRef({ x: 0, y: 0, zoom: 1 });
@@ -568,14 +571,11 @@ const updateBots = (deltaTime) => {
     bot.y = Math.max(0, Math.min(WORLD_HEIGHT, bot.y));
 
     bot.changeDirTimer += dt;
-
-    // Very basic flee behavior
   });
+
 };
 
-    // Very basic flee behavior
-  });
-};
+
 
 const updateSafeZone = (timeLeft) => {
   // Shrink from 1:00 (60s remaining) to 0:00.
@@ -587,14 +587,17 @@ const updateSafeZone = (timeLeft) => {
   // Re-reading: "Starts shrinking at 1:00 (120 seconds remaining)". 
   // NOTE: User said 1:00 (120s remaining). This means 60s elapsed.
 
-  if (timeLeft > 120) return; // Haven't started shrinking yet
+  // Hardcoded logic used 120, but GAME_DURATION_SEC is 180.
+  const startShrinkTime = GAME_DURATION_SEC - 60; // 180 - 60 = 120s remaining.
+
+  if (timeLeft > startShrinkTime) return; // Haven't started shrinking yet
 
   const maxRadius = INITIAL_SAFE_ZONE_RADIUS; // 3500
   const minRadius = WORLD_WIDTH * 0.25 / 2; // ~560
 
   // Time progress from 120 -> 0
-  const progress = (120 - timeLeft) / 120; // 0 to 1
-  // Linear shrink? Or non-linear? Linear is fine.
+  const progress = (startShrinkTime - timeLeft) / startShrinkTime; // 0 to 1
+  // Linear shrink
 
   const currentRadius = maxRadius - (maxRadius - minRadius) * progress;
   safeZoneRef.current = { x: WORLD_WIDTH / 2, y: WORLD_HEIGHT / 2, radius: currentRadius };
@@ -761,7 +764,11 @@ const checkCollisions = (myId, channel) => {
       const dy = cell.y - bot.y;
       const dist = Math.sqrt(dx * dx + dy * dy);
 
-      if (dist < cell.radius - bot.radius * 0.2 && cell.radius > bot.radius * 1.2) {
+      const dist = Math.sqrt(dx * dx + dy * dy);
+
+      // Relaxed Eating: Distance < My Radius (Center of Bot is inside Me)
+      // And I am bigger (1.1x)
+      if (cell.radius > bot.radius * 1.1 && dist < cell.radius - bot.radius * 0.4) {
         // Eat Bot (Gain 50% Mass)
         const gain = (bot.radius * bot.radius) * 0.5;
         const newArea = cell.radius * cell.radius + gain;
@@ -983,6 +990,18 @@ useEffect(() => {
   // Mount only ONCE
   const canvas = canvasRef.current;
   const ctx = canvas.getContext('2d');
+
+  // Simulated Loading Sequence
+  const loadInterval = setInterval(() => {
+    setLoadingProgress(prev => {
+      if (prev >= 100) {
+        clearInterval(loadInterval);
+        setIsLoading(false);
+        return 100;
+      }
+      return prev + 10;
+    });
+  }, 100);
 
   let mouseX = 0;
   let mouseY = 0;
@@ -1356,6 +1375,24 @@ return (
       </div>
     )}
   </div>
+
+    {
+  isLoading && (
+    <div style={{
+      position: 'absolute', top: 0, left: 0, width: '100%', height: '100%',
+      background: '#050510', zIndex: 9999, display: 'flex', flexDirection: 'column',
+      justifyContent: 'center', alignItems: 'center', color: 'white'
+    }}>
+      <h1 style={{ fontSize: '3rem', marginBottom: '20px', color: '#00ff00' }}>LOADING...</h1>
+      <div style={{ width: '300px', height: '10px', background: '#333', borderRadius: '5px' }}>
+        <div style={{ width: `${loadingProgress}%`, height: '100%', background: '#00ff00', borderRadius: '5px', transition: 'width 0.1s' }} />
+      </div>
+      <p style={{ marginTop: '10px', color: '#aaa' }}>Initializing World Entities...</p>
+    </div>
+  )
+}
+
+  </div >
 );
 }
 
