@@ -10,7 +10,15 @@ const INITIAL_RADIUS = 20;
 const FOOD_COUNT = 300;
 const VIRUS_COUNT = 25;
 const VIRUS_RADIUS = 35;
-const GAME_DURATION_SEC = 120;
+const GAME_DURATION_SEC = 180;
+const INITIAL_SAFE_ZONE_RADIUS = Math.max(WORLD_WIDTH, WORLD_HEIGHT) / 1.5; // Starts covering everything (roughly)
+// Map is square 4500x4500. Center 2250,2250.
+// Circle radius that covers corners of 4500x4500 is sqrt(2250^2 + 2250^2) = 3181.
+// Let's settle on a Safe Zone Radius start = 3500 (Full map safe)
+// End radius = WORLD_WIDTH * 0.25 / 2? No, map size to 25%. Area? or Width?
+// "Only 25% map size". If Area is 25%, width is 50%. If Width is 25%, Area is 6.25%.
+// Let's assume Width/Radius becomes 25% of original (More dramatic).
+// Original Radius equivalent ~2250. Final Radius ~560.
 
 export default function GamePage() {
   const canvasRef = useRef(null);
@@ -34,6 +42,7 @@ export default function GamePage() {
   // World State
   const myPlayerCellsRef = useRef([]);
   const cameraRef = useRef({ x: 0, y: 0, zoom: 1 });
+  const safeZoneRef = useRef({ x: WORLD_WIDTH / 2, y: WORLD_HEIGHT / 2, radius: 4000 }); // Start bigger than map
 
   // Entities
   const otherPlayersRef = useRef(new Map());
@@ -63,7 +72,9 @@ export default function GamePage() {
   // const cameraRef = useRef({ x: WORLD_WIDTH / 2, y: WORLD_HEIGHT / 2 }); // Removed duplicate
   const gameModeRef = useRef('single');
   const isGameStartingRef = useRef(false);
+  const isGameStartingRef = useRef(false);
   const lobbyTimerRef = useRef(0);
+  const respawnTimerRef = useRef(0); // For 10s cooldown
 
   // Helper to switch state cleanly
   const switchGameState = (newState) => {
@@ -166,6 +177,10 @@ export default function GamePage() {
         ctx.fillText(`STARTING IN ${Math.ceil(lobbyTimerRef.current)}...`, canvas.width / 2, 100);
       } else {
         ctx.fillText("WAITING FOR PLAYERS...", canvas.width / 2, 100);
+        ctx.font = '20px Arial';
+        ctx.fillStyle = '#aaa';
+        ctx.fillText("Game Duration: 3 Minutes", canvas.width / 2, 140);
+        ctx.fillText("Poison Circle Starts at 1:00", canvas.width / 2, 165);
       }
 
       // Draw Players List (From Ref + Self)
@@ -187,7 +202,22 @@ export default function GamePage() {
     // ... grids ...
     ctx.strokeStyle = '#222'; ctx.lineWidth = 2;
     for (let x = 0; x <= WORLD_WIDTH; x += 100) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, WORLD_HEIGHT); ctx.stroke(); }
+    for (let x = 0; x <= WORLD_WIDTH; x += 100) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, WORLD_HEIGHT); ctx.stroke(); }
     for (let y = 0; y <= WORLD_HEIGHT; y += 100) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(WORLD_WIDTH, y); ctx.stroke(); }
+
+    // Draw Safe Zone
+    const sz = safeZoneRef.current;
+    if (sz.radius < 4000) { // Only draw if shrinking has started/is relevant
+      ctx.beginPath();
+      ctx.arc(sz.x, sz.y, sz.radius, 0, Math.PI * 2);
+      ctx.strokeStyle = 'rgba(255, 0, 0, 0.5)';
+      ctx.lineWidth = 20;
+      ctx.stroke();
+      // Draw warning text if shrinking
+      if (timeLeftRef.current > 120 && timeLeftRef.current < 130) {
+        // Flashing warning? handled via UI mostly but can add world text
+      }
+    }
 
     // ... Entities ...
     foodRef.current.forEach(f => {
@@ -766,6 +796,15 @@ export default function GamePage() {
 
           setEffects(prev => prev.filter(e => e.life > 0).map(e => ({ ...e, life: e.life - 0.02 })));
 
+          // New Logic
+          updateSafeZone(timeLeftRef.current);
+          applyDecay(deltaTime);
+
+          // Zone Warning
+          if (Math.abs(timeLeftRef.current - 130) < 0.1) { // At 130s left (50s elapsed)
+            showNotification("⚠️ ZONE SHRINKING IN 10S ⚠️");
+          }
+
           jackpotTimer += deltaTime;
           if (jackpotTimer > 15000) {
             if (Math.random() < 0.8) {
@@ -826,123 +865,151 @@ export default function GamePage() {
               switchGameState('gameover');
             }
           }
-          frameCount = 0;
-          lastFpsTime = time;
-        }
-      } catch (err) {
-        console.error("Game Loop Error:", err);
-      }
 
-      requestRef.current = requestAnimationFrame(animate);
-    };
+          // Update Respawn Timer if dead
+          if (gameStateRef.current === 'playing' && myPlayerCellsRef.current.length === 0) {
+            // We are dead / spectating
+            // But 'playing' state is kept for spectating?
+            // Logic check: "gameover" is valid state for end of match. 
+            // Valid Death state: we are in "playing" but have 0 cells.
+            // We need a timer for respawn button.
+          }
+        }
+        frameCount = 0;
+        lastFpsTime = time;
+      }
+      } catch (err) {
+      console.error("Game Loop Error:", err);
+    }
 
     requestRef.current = requestAnimationFrame(animate);
+  };
 
-    return () => {
-      window.removeEventListener('resize', resizeCanvas);
-      window.removeEventListener('mousemove', handleMouseMove);
-      window.removeEventListener('keydown', handleKeyDown);
-      cancelAnimationFrame(requestRef.current);
-      supabase.removeChannel(channel);
-    };
-  }, []); // Mount ONCE. Game loop relies on Refs for state updates.
+  requestRef.current = requestAnimationFrame(animate);
 
-  return (
-    <div style={{ width: '100vw', height: '100vh', overflow: 'hidden', userSelect: 'none', fontFamily: 'sans-serif' }}>
-      <canvas ref={canvasRef} style={{ display: 'block' }} />
+  return () => {
+    window.removeEventListener('resize', resizeCanvas);
+    window.removeEventListener('mousemove', handleMouseMove);
+    window.removeEventListener('keydown', handleKeyDown);
+    cancelAnimationFrame(requestRef.current);
+    supabase.removeChannel(channel);
+  };
+}, []); // Mount ONCE. Game loop relies on Refs for state updates.
 
-      {notification && (
-        <div style={{
-          position: 'absolute', top: '15%', left: '50%', transform: 'translateX(-50%)',
-          color: '#ffd700', fontSize: '3rem', fontWeight: 'bold', textShadow: '0 0 20px black'
-        }}>
-          {notification}
-        </div>
-      )}
+return (
+  <div style={{ width: '100vw', height: '100vh', overflow: 'hidden', userSelect: 'none', fontFamily: 'sans-serif' }}>
+    <canvas ref={canvasRef} style={{ display: 'block' }} />
 
-      {/* Leaderboard - Top Left */}
-      {(gameState === 'playing' || gameState === 'gameover') && (
-        <div style={{
-          position: 'absolute', top: 10, left: 10,
-          background: 'rgba(0,0,0,0.5)', padding: '10px', borderRadius: '5px',
-          color: 'white', fontSize: '14px', width: '200px'
-        }}>
-          <div style={{ borderBottom: '1px solid #eba', marginBottom: '5px', fontWeight: 'bold', color: '#eba' }}>LEADERBOARD</div>
-          {leaderboard.map((p, i) => (
-            <div key={i} style={{ display: 'flex', justifyContent: 'space-between', color: p.isMe ? '#ff0' : '#fff' }}>
-              <span>{i + 1}. {p.name.substring(0, 10)}</span>
-              <span>{Math.round(p.score)}</span>
-            </div>
-          ))}
-        </div>
-      )}
+    {notification && (
+      <div style={{
+        position: 'absolute', top: '15%', left: '50%', transform: 'translateX(-50%)',
+        color: '#ffd700', fontSize: '3rem', fontWeight: 'bold', textShadow: '0 0 20px black'
+      }}>
+        {notification}
+      </div>
+    )}
 
-      {gameState === 'playing' && (
-        <>
-          <div style={{
-            position: 'absolute', top: 20, left: '50%', transform: 'translateX(-50%)',
-            color: timeLeft < 30 ? 'red' : 'white', fontSize: '3rem', fontWeight: 'bold', textShadow: '0 0 10px black'
-          }}>
-            {formatTime(timeLeft)}
+    {/* Leaderboard - Top Left */}
+    {(gameState === 'playing' || gameState === 'gameover') && (
+      <div style={{
+        position: 'absolute', top: 10, left: 10,
+        background: 'rgba(0,0,0,0.5)', padding: '10px', borderRadius: '5px',
+        color: 'white', fontSize: '14px', width: '200px'
+      }}>
+        <div style={{ borderBottom: '1px solid #eba', marginBottom: '5px', fontWeight: 'bold', color: '#eba' }}>LEADERBOARD</div>
+        {leaderboard.map((p, i) => (
+          <div key={i} style={{ display: 'flex', justifyContent: 'space-between', color: p.isMe ? '#ff0' : '#fff' }}>
+            <span>{i + 1}. {p.name.substring(0, 10)}</span>
+            <span>{Math.round(p.score)}</span>
           </div>
-          <div style={{ position: 'absolute', bottom: 20, left: 20, color: 'rgba(255,255,255,0.5)', fontSize: '1rem' }}>
-            [Space] Split &nbsp; [W] Shoot Mass
-          </div>
-        </>
-      )}
+        ))}
+      </div>
+    )}
 
-      {gameState === 'lobby' && (
+    {gameState === 'playing' && (
+      <>
         <div style={{
-          position: 'absolute', bottom: '10%', left: '50%', transform: 'translateX(-50%)',
-          textAlign: 'center'
+          position: 'absolute', top: 20, left: '50%', transform: 'translateX(-50%)',
+          color: timeLeft < 30 ? 'red' : 'white', fontSize: '3rem', fontWeight: 'bold', textShadow: '0 0 10px black'
         }}>
-          <h2 style={{ color: 'white', marginBottom: '20px' }}>Waiting for players... ({otherPlayersRef.current.size + 1} connected)</h2>
+          {formatTime(timeLeft)}
+        </div>
+        <div style={{ position: 'absolute', bottom: 20, left: 20, color: 'rgba(255,255,255,0.5)', fontSize: '1rem' }}>
+          [Space] Split &nbsp; [W] Shoot Mass
+        </div>
+      </>
+    )}
+
+    {gameState === 'lobby' && (
+      <div style={{
+        position: 'absolute', bottom: '10%', left: '50%', transform: 'translateX(-50%)',
+        textAlign: 'center'
+      }}>
+        <h2 style={{ color: 'white', marginBottom: '20px' }}>Waiting for players... ({otherPlayersRef.current.size + 1} connected)</h2>
+        <button
+          onClick={toggleReady}
+          style={{ ...btnStyle, background: isReady ? '#888' : '#0f0' }}
+        >
+          {isReady ? 'CANCEL READY' : 'READY UP!'}
+        </button>
+        <div style={{ color: '#aaa', marginTop: '10px' }}>Needs at least 2 players to start</div>
+      </div>
+    )}
+
+    {gameState === 'menu' && (
+      <div style={overlayStyle}>
+        <h1 style={{ fontSize: '4rem', color: '#00ff00', textShadow: '0 0 20px #00ff00' }}>GLOW BATTLE.IO</h1>
+        <input type="text" placeholder="Enter Nickname" value={nickname} onChange={e => setNicknameWrapper(e.target.value)}
+          style={{ padding: '15px', fontSize: '1.5rem', borderRadius: '5px', border: 'none', textAlign: 'center', marginBottom: '20px' }} maxLength={10} />
+
+        <div style={{ display: 'flex', gap: '20px' }}>
+          <button onClick={handleSinglePlayer} style={btnStyle}>SINGLE PLAYER</button>
+          <button onClick={handleMultiPlayer} style={{ ...btnStyle, background: 'linear-gradient(45deg, #00bdff, #0077ff)' }}>MULTIPLAYER</button>
+        </div>
+      </div>
+    )}
+
+    {gameState === 'playing' && myPlayerCellsRef.current.length === 0 && (
+      <div style={{
+        position: 'absolute', top: '40%', left: '50%', transform: 'translate(-50%, -50%)',
+        textAlign: 'center', pointerEvents: 'none' // Let clicks pass? No, buttons need clicks
+      }}>
+        <h1 style={{ color: 'red', textShadow: '0 0 5px black' }}>YOU DIED</h1>
+        <div style={{ pointerEvents: 'auto' }}>
           <button
-            onClick={toggleReady}
-            style={{ ...btnStyle, background: isReady ? '#888' : '#0f0' }}
+            onClick={() => { spawnPlayer(); }}
+            style={{ ...btnStyle, background: respawnTimerRef.current > 0 ? '#555' : '#ff4444' }}
+            disabled={respawnTimerRef.current > 0}
           >
-            {isReady ? 'CANCEL READY' : 'READY UP!'}
+            {respawnTimerRef.current > 0 ? `RESPAWN IN ${Math.ceil(respawnTimerRef.current)}...` : 'RESPAWN NOW'}
           </button>
-          <div style={{ color: '#aaa', marginTop: '10px' }}>Needs at least 2 players to start</div>
         </div>
-      )}
+      </div>
+    )}
 
-      {gameState === 'menu' && (
-        <div style={overlayStyle}>
-          <h1 style={{ fontSize: '4rem', color: '#00ff00', textShadow: '0 0 20px #00ff00' }}>GLOW BATTLE.IO</h1>
-          <input type="text" placeholder="Enter Nickname" value={nickname} onChange={e => setNicknameWrapper(e.target.value)}
-            style={{ padding: '15px', fontSize: '1.5rem', borderRadius: '5px', border: 'none', textAlign: 'center', marginBottom: '20px' }} maxLength={10} />
+    {gameState === 'gameover' && (
+      <div style={overlayStyle}>
+        <h1 style={{ color: 'red', fontSize: '3rem' }}>GAME OVER</h1>
+        <h2>Final Score: {Math.round(score)}</h2>
+        <button onClick={() => switchGameState('menu')} style={btnStyle}>MAIN MENU</button>
 
-          <div style={{ display: 'flex', gap: '20px' }}>
-            <button onClick={handleSinglePlayer} style={btnStyle}>SINGLE PLAYER</button>
-            <button onClick={handleMultiPlayer} style={{ ...btnStyle, background: 'linear-gradient(45deg, #00bdff, #0077ff)' }}>MULTIPLAYER</button>
-          </div>
+        <div style={{ marginTop: '20px', display: 'flex', gap: '20px' }}>
+          <button onClick={() => {
+            spawnPlayer();
+            switchGameState('playing');
+          }} style={{ ...btnStyle, background: '#444' }}>RESPAWN</button>
+
+          <button onClick={() => {
+            setScore(0);
+            myPlayerCellsRef.current = []; // Ensure dead
+            switchGameState('playing');
+            showNotification("Spectating Mode");
+          }} style={{ ...btnStyle, background: '#666' }}>SPECTATE</button>
         </div>
-      )}
-
-      {gameState === 'gameover' && (
-        <div style={overlayStyle}>
-          <h1 style={{ color: 'red', fontSize: '3rem' }}>GAME OVER</h1>
-          <h2>Final Score: {Math.round(score)}</h2>
-          <button onClick={() => switchGameState('menu')} style={btnStyle}>MAIN MENU</button>
-
-          <div style={{ marginTop: '20px', display: 'flex', gap: '20px' }}>
-            <button onClick={() => {
-              spawnPlayer();
-              switchGameState('playing');
-            }} style={{ ...btnStyle, background: '#444' }}>RESPAWN</button>
-
-            <button onClick={() => {
-              setScore(0);
-              myPlayerCellsRef.current = []; // Ensure dead
-              switchGameState('playing');
-              showNotification("Spectating Mode");
-            }} style={{ ...btnStyle, background: '#666' }}>SPECTATE</button>
-          </div>
-        </div>
-      )}
-    </div>
-  );
+      </div>
+    )}
+  </div>
+);
 }
 
 const overlayStyle = { position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', background: 'rgba(10,10,20, 0.9)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'white', zIndex: 10 };
