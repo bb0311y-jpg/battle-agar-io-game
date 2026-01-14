@@ -1261,7 +1261,7 @@ useEffect(() => {
       frameCount = 0;
       lastFpsTime = time;
     }
-      } catch (err) {
+  } catch (err) {
     console.error("Game Loop Error:", err);
   }
 
