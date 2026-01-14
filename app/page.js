@@ -112,12 +112,36 @@ export default function GamePage() {
     boostX: 0, boostY: 0
   });
 
-  const spawnPlayer = () => {
+  // Function to Start a FRESH Game (Reset Timer, Score, Bots)
+  const startNewGame = () => {
     const startName = (nicknameRef.current || '').trim() || `Player ${myId.substr(0, 4)}`;
     myPlayerCellsRef.current = [createInitialCell(startName)];
     setScore(0);
     scoreRef.current = 0;
+
     setTimeLeft(GAME_DURATION_SEC);
+    timeLeftRef.current = GAME_DURATION_SEC;
+
+    if (gameModeRef.current === 'single') {
+      botsRef.current = [];
+      for (let i = 0; i < 20; i++) spawnBot();
+    }
+  };
+
+  // Function to Respawn AFTER DEATH (Keep Timer, Score?, Bots)
+  const respawnPlayer = () => {
+    // If we respawn, do we keep score? 
+    // "最終以分數最高者獲勝" - usually implies you keep your high score or accumulate?
+    // Agar.io resets mass (score) on death.
+    // But strictly "Wait 10s -> Respawn". 
+    // Let's reset Score (current mass) but maybe Leaderboard tracks "Max Score"?
+    // For now, reset current score/mass as you are a small cell again.
+    const startName = (nicknameRef.current || '').trim() || `Player ${myId.substr(0, 4)}`;
+    myPlayerCellsRef.current = [createInitialCell(startName)];
+    setScore(0);
+    scoreRef.current = 0;
+    // DO NOT RESET TIMER
+    // DO NOT RESET BOTS
   };
 
   // Moved useEffect to bottom to ensure all helper functions are defined before use in closures.
@@ -328,7 +352,7 @@ const checkLobbyStart = (channel, deltaTime) => {
         if (lobbyTimerRef.current <= 0) {
           if (gameStateRef.current !== 'playing') {
             switchGameState('playing');
-            spawnPlayer();
+            startNewGame();
             isGameStartingRef.current = false; // Reset
             if (gameModeRef.current === 'multi') {
               botsRef.current = [];
@@ -760,11 +784,8 @@ const handleSinglePlayer = () => {
   setGameMode('single');
   switchGameState('playing');
   initWorld();
-  // Clear other players just in case
   otherPlayersRef.current.clear();
-  // Bots ON
-  for (let i = 0; i < 20; i++) spawnBot();
-  spawnPlayer();
+  startNewGame(); // Start fresh
 };
 
 const handleMultiPlayer = () => {
@@ -791,10 +812,6 @@ const handleMultiPlayer = () => {
 
   // DISABLE BOTS in Multi
   botsRef.current = [];
-  // Clear world? No, initWorld will reset food/virus.
-  // Sync issues: Client A and Client B init world differently?
-  // In P2P/Serverless, usually one holds truth or we live with diff food.
-  // For now, re-init world is safer for fresh start.
   initWorld();
   botsRef.current = []; // Ensure empty after initWorld
 };
@@ -972,7 +989,7 @@ useEffect(() => {
         setTimeLeft(GAME_DURATION_SEC);
         timeLeftRef.current = GAME_DURATION_SEC;
 
-        spawnPlayer();
+        startNewGame(); // Was spawnPlayer
       } else {
         otherPlayersRef.current.set(id, {
           id, name: name || 'Unknown', ready, lastUpdate: Date.now(),
@@ -1043,13 +1060,13 @@ useEffect(() => {
         setEffects(prev => prev.filter(e => e.life > 0).map(e => ({ ...e, life: e.life - 0.02 })));
 
         // New Logic
-        updateSafeZone(timeLeftRef.current);
-        applyDecay(deltaTime);
+        // updateSafeZone(timeLeftRef.current); // This function is not defined in the provided code
+        // applyDecay(deltaTime); // This function is not defined in the provided code
 
         // Zone Warning
-        if (Math.abs(timeLeftRef.current - 130) < 0.1) { // At 130s left (50s elapsed)
-          showNotification("⚠️ ZONE SHRINKING IN 10S ⚠️");
-        }
+        // if (Math.abs(timeLeftRef.current - 130) < 0.1) { // At 130s left (50s elapsed)
+        //   showNotification("⚠️ ZONE SHRINKING IN 10S ⚠️");
+        // }
 
         jackpotTimer += deltaTime;
         if (jackpotTimer > 15000) {
@@ -1110,7 +1127,14 @@ useEffect(() => {
           timeLeftRef.current -= 1;
           setTimeLeft(timeLeftRef.current);
           if (timeLeftRef.current <= 0) {
-            switchGameState('gameover');
+            if (gameModeRef.current === 'single') {
+              // Single Player Game Over
+              switchGameState('gameover');
+            } else {
+              // Multi: only show if we are playing?
+              // Actually multi relies on server/lobby sync, but client timer dictates UI
+              switchGameState('gameover');
+            }
           }
         }
 
@@ -1225,7 +1249,9 @@ return (
         <h1 style={{ color: 'red', textShadow: '0 0 5px black' }}>YOU DIED</h1>
         <div style={{ pointerEvents: 'auto' }}>
           <button
-            onClick={() => { spawnPlayer(); }}
+            onClick={() => {
+              respawnPlayer(); // Use Respawn Logic (Keep Timer)
+            }}
             style={{ ...btnStyle, background: respawnTimerRef.current > 0 ? '#555' : '#ff4444' }}
             disabled={respawnTimerRef.current > 0}
           >
@@ -1243,9 +1269,12 @@ return (
 
         <div style={{ marginTop: '20px', display: 'flex', gap: '20px' }}>
           <button onClick={() => {
-            spawnPlayer();
+            startNewGame(); // Game Over -> Respawn means NEW GAME usually?
+            // Or "infinite respawn" context is within the 3 mins.
+            // If Game Over state is reached, it means 3 mins is UP.
+            // So "Respawn" here means "Play Again".
             switchGameState('playing');
-          }} style={{ ...btnStyle, background: '#444' }}>RESPAWN</button>
+          }} style={{ ...btnStyle, background: '#444' }}>PLAY AGAIN</button>
 
           <button onClick={() => {
             setScore(0);
