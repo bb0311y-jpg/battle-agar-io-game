@@ -1260,23 +1260,22 @@ useEffect(() => {
       }
       frameCount = 0;
       lastFpsTime = time;
+    } catch (err) {
+      console.error("Game Loop Error:", err);
     }
-  } catch (err) {
-    console.error("Game Loop Error:", err);
-  }
+
+    requestRef.current = requestAnimationFrame(animate);
+  };
 
   requestRef.current = requestAnimationFrame(animate);
-};
 
-requestRef.current = requestAnimationFrame(animate);
-
-return () => {
-  window.removeEventListener('resize', resizeCanvas);
-  window.removeEventListener('mousemove', handleMouseMove);
-  window.removeEventListener('keydown', handleKeyDown);
-  cancelAnimationFrame(requestRef.current);
-  supabase.removeChannel(channel);
-};
+  return () => {
+    window.removeEventListener('resize', resizeCanvas);
+    window.removeEventListener('mousemove', handleMouseMove);
+    window.removeEventListener('keydown', handleKeyDown);
+    cancelAnimationFrame(requestRef.current);
+    supabase.removeChannel(channel);
+  };
 }, []); // Mount ONCE. Game loop relies on Refs for state updates.
 
 return (
