@@ -1341,7 +1341,8 @@ return (
 
     {gameState === 'menu' && (
       <div style={overlayStyle}>
-        <h1 style={{ fontSize: '4rem', color: '#00ff00', textShadow: '0 0 20px #00ff00' }}>GLOW BATTLE.IO</h1>
+        <h1 style={{ fontSize: '4rem', color: '#00ff00', textShadow: '0 0 20px #00ff00' }}>GLOW BATTLE v1.5</h1>
+        <div style={{ color: '#aaa', marginBottom: '20px' }}>Current Version: 3 MIN UPDATE</div>
         <input type="text" placeholder="Enter Nickname" value={nickname} onChange={e => setNicknameWrapper(e.target.value)}
           style={{ padding: '15px', fontSize: '1.5rem', borderRadius: '5px', border: 'none', textAlign: 'center', marginBottom: '20px' }} maxLength={10} />
 
