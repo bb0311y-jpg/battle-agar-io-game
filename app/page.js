@@ -687,8 +687,9 @@ const checkCollisions = (myId, channel) => {
       const dist = Math.sqrt(dx * dx + dy * dy);
 
       if (dist < cell.radius - bot.radius * 0.2 && cell.radius > bot.radius * 1.2) {
-        // Eat Bot
-        const newArea = cell.radius * cell.radius + bot.radius * bot.radius;
+        // Eat Bot (Gain 50% Mass)
+        const gain = (bot.radius * bot.radius) * 0.5;
+        const newArea = cell.radius * cell.radius + gain;
         cell.radius = Math.sqrt(newArea);
         botsRef.current.splice(i, 1);
         addEffect(cell.x, cell.y, "CRUNCH", "red");
@@ -720,8 +721,9 @@ const checkCollisions = (myId, channel) => {
 
         // Rule: Must be 20% bigger
         if (cell.radius > enemyCell.radius * 1.2 && dist < cell.radius - enemyCell.radius * 0.4) {
-          // EAT
-          const newArea = cell.radius * cell.radius + enemyCell.radius * enemyCell.radius;
+          // EAT (Gain 50% Mass)
+          const gain = (enemyCell.radius * enemyCell.radius) * 0.5;
+          const newArea = cell.radius * cell.radius + gain;
           cell.radius = Math.sqrt(newArea);
           eatenIndices.push(idx);
           addEffect(cell.x, cell.y, "KILL!", "red");
