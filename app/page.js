@@ -1220,12 +1220,21 @@ export default function GamePage() {
     const newState = !isReadyRef.current;
     setIsReadyWrapper(newState);
     if (gameModeRef.current === 'multi') {
-      channelRef.current?.track({
+      const payload = {
         id: myId,
         name: nicknameRef.current || `Player ${myId.substr(0, 4)}`,
         ready: newState,
         status: 'lobby',
         updatedAt: Date.now()
+      };
+
+      channelRef.current?.track(payload);
+
+      // Fallback Broadcast for Auth issues
+      channelRef.current?.send({
+        type: 'broadcast',
+        event: 'force_lobby_status',
+        payload: payload
       });
     }
   };
@@ -1408,26 +1417,48 @@ export default function GamePage() {
 
         const newPlayers = new Map();
 
+
+        // Fallback: If 'updatedAt' is missing (old client) or we suffer from strict Presence issues, 
+        // trust the 'state' map. 
+        // And importantly: Listen for manual broadcasts of 'ready' as a backup?
+        // Actually, let's just stick to the sorted logic.
+
         for (const key in state) {
-          // Provide robustness against zombie descriptors or out-of-order updates
-          // We scan ALL entries for this key, effectively merging or picking latest
           const entries = state[key];
           if (!entries || entries.length === 0) continue;
 
           // Sort by updatedAt if available, else take last
-          // We need to ensure we track 'updatedAt' in our payload
-          const sorted = entries.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+          // Provide fallback for sorting if updatedAt is missing
+          const sorted = entries.sort((a, b) => {
+            const tA = a.updatedAt || 0;
+            const tB = b.updatedAt || 0;
+            return tB - tA;
+          });
+
           const userData = sorted[0]; // Newest
 
           if (!userData) continue;
-          if (userData.id === myId) continue; // Skip self based on Payload ID (Safety)
+          if (userData.id === myId) continue; // Skip self
 
           newPlayers.set(userData.id, { ...userData, lastUpdate: Date.now() });
         }
 
         otherPlayersRef.current = newPlayers;
-        // Trigger re-render for UI
         setDebugInfo(prev => ({ ...prev, players: newPlayers.size + 1 }));
+      })
+      // Backup Handler: If 'track' fails due to Auth, we allow manual broadcast of 'ready' state
+      // to update the local list. This is a hybrid approach for robustness.
+      .on('broadcast', { event: 'force_lobby_status' }, (payload) => {
+        // Payload: { id, name, ready }
+        const { id, name, ready, updatedAt } = payload.payload;
+        if (id === myId) return;
+
+        const prev = otherPlayersRef.current.get(id) || {};
+        // Only update if newer
+        if ((updatedAt || 0) > (prev.updatedAt || 0)) {
+          otherPlayersRef.current.set(id, { ...prev, id, name, ready, updatedAt, lastUpdate: Date.now() });
+          setDebugInfo(prev => ({ ...prev, players: otherPlayersRef.current.size + 1 }));
+        }
       })
       .on('broadcast', { event: 'player_death' }, (payload) => {
         if (gameModeRef.current === 'single') return; // Ignore in single player
