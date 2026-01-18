@@ -48,14 +48,14 @@
     - 可被玩家吞噬
 
 ## Phase 4.3: 進階玩法 (Advanced Gameplay) - New Request
-- [ ] **Task 4.3.1**: 毒圈機制 (Poison Circle)
+- [x] **Task 4.3.1**: 毒圈機制 (Poison Circle)
     - 遊戲時間 3:00 (180s)
     - T=50s 提示 "Zone Shrinking"
     - T=60s 開始縮圈，目標為地圖 25% 大小
     - 圈外懲罰：Mass Decay + 200%
-- [ ] **Task 4.3.2**: 自然衰減 (Natural Decay)
+- [x] **Task 4.3.2**: 自然衰減 (Natural Decay)
     - 公式: Mass * (1 - 0.002 * dt) set per second (0.2%/s)
-- [ ] **Task 4.3.3**: 無限復活 (Infinite Respawn)
+- [x] **Task 4.3.3**: 無限復活 (Infinite Respawn)
     - 死亡後等待 10s 可復活
     - 結算時以最高分獲勝 (High Score)
 ## Phase 4: 資料庫與博奕系統 (Database & Betting)

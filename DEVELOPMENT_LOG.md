@@ -44,3 +44,31 @@ Continued development from the Multiplayer Stability fix. Implemented core gamep
     *   Virus physics (Pushing viruses with W).
     *   Cell merging (Recombine cells after split cooldown is fully verified).
     *   Visual polish (Smooth animations for split).
+
+## Date: 2026-01-15 (Session 3) [Recovery & Phase 5 Start]
+
+### Summary
+Recovered project state after folder deletion. Confirmed that local git history was lost but remote sync preserved all Phase 4 (Gameplay) features including Poison Circle, Split mechanics, and Eject Mass. Started implementation of Phase 5 (Database & Betting).
+
+### 🚀 Features Restored & Implemented
+1.  **Recovery**: Validated `app/page.js` contains all advanced gameplay logic (Poison, Decay, Respawn).
+2.  **Supabase Auth**: Integrated `signInAnonymously` into the game loop (`app/page.js`).
+3.  **Database Schema**: Created `supabase_schema.sql` defining `profiles` (with balance) and `matches` tables.
+
+### 📝 Next Steps
+*   **Run SQL**: User needs to execute `supabase_schema.sql` in Supabase Dashboard.
+*   **UI**: specific "Betting" UI in the Lobby.
+*   **Backend**: Logic to deduct funds on game start.
+
+## Date: 2026-01-18 (Session 4) [Documentation System Setup]
+
+### 📝 Change Log
+| Type | Description | Status |
+| :--- | :--- | :--- |
+| **Doc** | Created `PROJECT_STATUS.md` for project communication and next-cycle context. | Done |
+| **Doc** | Established new logging format in `DEVELOPMENT_LOG.md` including self-notes. | Done |
+
+### 🧠 Note to Self (Review & Lessons)
+*   **Documentation**: It is crucial to maintain `PROJECT_STATUS.md`. This file acts as the bridge between sessions.
+*   **Workflow**: Before signing off, always generate the "Startup Phrase" and place it in `PROJECT_STATUS.md`.
+*   **Goal**: Ensure the user can simply copy-paste the startup phrase to resume work instantly.

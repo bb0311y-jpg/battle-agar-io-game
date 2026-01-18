@@ -28,7 +28,8 @@ export default function GamePage() {
   const [debugInfo, setDebugInfo] = useState({ fps: 0, players: 0 });
   const [gameState, setGameState] = useState('menu'); // 'menu', 'lobby', 'countdown', 'playing', 'gameover'
   const [gameMode, setGameMode] = useState('single'); // 'single', 'multi'
-  const [myId] = useState(() => Math.random().toString(36).substr(2, 9)); // Stable ID
+  const [myId] = useState(() => (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : Math.random().toString(36).substr(2, 9)); // Stable ID
+
   const [nickname, setNickname] = useState('');
   const [score, setScore] = useState(0);
   const [timeLeft, setTimeLeft] = useState(GAME_DURATION_SEC);
@@ -75,11 +76,10 @@ export default function GamePage() {
   // const cameraRef = useRef({ x: WORLD_WIDTH / 2, y: WORLD_HEIGHT / 2 }); // Removed duplicate
   const gameModeRef = useRef('single');
   const isGameStartingRef = useRef(false);
-  const isGameStartingRef = useRef(false);
-  const isGameStartingRef = useRef(false);
   const lobbyTimerRef = useRef(0);
   const respawnTimerRef = useRef(0); // For 10s cooldown
   const hasDiedRef = useRef(false); // Track death state
+  const savedScoreRef = useRef(0); // Store score before death
 
   // Helper to switch state cleanly
   const switchGameState = (newState) => {
@@ -117,9 +117,43 @@ export default function GamePage() {
     boostX: 0, boostY: 0
   });
 
+  // Supabase Auth State
+  const [user, setUser] = useState(null);
+
+  // Moved useEffect to bottom to ensure all helper functions are defined before use in closures.
+
+  // --- Auth & Profile Logic ---
+  useEffect(() => {
+    const { data: authListener } = supabase.auth.onAuthStateChange(async (event, session) => {
+      const currentUser = session?.user;
+      setUser(currentUser);
+      if (currentUser) {
+        // Here we would fetch the profile/balance
+        console.log("User Authenticated:", currentUser.id);
+      }
+    });
+
+    // Auto Sign-in Anonymously if not logged in
+    const signIn = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        const { error } = await supabase.auth.signInAnonymously();
+        if (error) console.error("Auth Error:", error);
+      }
+    };
+    signIn();
+
+    return () => {
+      authListener.subscription.unsubscribe();
+    };
+  }, []);
+
   // Function to Start a FRESH Game (Reset Timer, Score, Bots)
-  const startNewGame = () => {
-    const startName = (nicknameRef.current || '').trim() || `Player ${myId.substr(0, 4)}`;
+  const startNewGame = (shouldSpawnBots = true) => {
+    const finalMyId = user ? user.id : myId; // Use Auth ID if available
+    const startName = (nicknameRef.current || '').trim() || `Player ${finalMyId.substr(0, 4)}`;
+
+    // Update IDs
     myPlayerCellsRef.current = [createInitialCell(startName)];
     setScore(0);
     scoreRef.current = 0;
@@ -127,10 +161,14 @@ export default function GamePage() {
     setTimeLeft(GAME_DURATION_SEC);
     timeLeftRef.current = GAME_DURATION_SEC;
 
-    if (gameModeRef.current === 'single') {
+    // In Multi, HOST spawns bots passed via Data, logic elsewhere.
+    // In Single, we spawn here.
+    if ((gameModeRef.current === 'single' && shouldSpawnBots)) {
       botsRef.current = [];
       for (let i = 0; i < 20; i++) spawnBot();
+    }
 
+    if (gameModeRef.current === 'single') {
       // Trigger Loading Screen for Single Player Start
       setIsLoading(true);
       setLoadingProgress(0);
@@ -156,7 +194,8 @@ export default function GamePage() {
     // But strictly "Wait 10s -> Respawn". 
     // Let's reset Score (current mass) but maybe Leaderboard tracks "Max Score"?
     // For now, reset current score/mass as you are a small cell again.
-    const startName = (nicknameRef.current || '').trim() || `Player ${myId.substr(0, 4)}`;
+    const finalMyId = user ? user.id : myId;
+    const startName = (nicknameRef.current || '').trim() || `Player ${finalMyId.substr(0, 4)}`;
     myPlayerCellsRef.current = [createInitialCell(startName)];
     setScore(0);
     scoreRef.current = 0;
@@ -164,8 +203,6 @@ export default function GamePage() {
     // DO NOT RESET BOTS
     hasDiedRef.current = false;
   };
-
-  // Moved useEffect to bottom to ensure all helper functions are defined before use in closures.
 
 
   // --- Logic ---
@@ -194,11 +231,19 @@ export default function GamePage() {
     const all = [];
     // Me
     all.push({ name: nicknameRef.current || "Me", score: scoreRef.current, isMe: true });
-    // Others
+
+    // Others (Real Players)
     otherPlayersRef.current.forEach(p => {
       let s = p.score || 0;
       if (!s && p.cells) s = Math.floor(p.cells.reduce((a, c) => a + c.radius, 0));
       all.push({ name: String(p.name || "Enemy"), score: s, isMe: false });
+    });
+
+    // Bots (Add them to leaderboard so Single Player has competition)
+    botsRef.current.forEach(b => {
+      // Bot score is roughly its radius (or area, but we use radius sum for score usually)
+      // Simple approximation: Score = Radius.
+      all.push({ name: b.name || "Bot", score: Math.floor(b.radius), isMe: false });
     });
 
     all.sort((a, b) => b.score - a.score);
@@ -295,9 +340,29 @@ export default function GamePage() {
 
     [...botsRef.current, ...Array.from(otherPlayersRef.current.values()).flatMap(p => p.cells || []), ...myPlayerCellsRef.current].forEach(ent => {
       if (!ent) return;
-      ctx.beginPath(); ctx.arc(ent.x, ent.y, ent.radius, 0, Math.PI * 2);
+
+      let drawX = ent.x;
+      let drawY = ent.y;
+
+      // Poison Effect: Shake and Red Glow
+      if (ent.isPoisoned) {
+        drawX += (Math.random() - 0.5) * 4;
+        drawY += (Math.random() - 0.5) * 4;
+
+        ctx.beginPath();
+        ctx.arc(drawX, drawY, ent.radius + 5, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(255, 0, 0, ${0.3 + Math.random() * 0.2})`; // Pulse red
+        ctx.fill();
+      }
+
+      ctx.beginPath(); ctx.arc(drawX, drawY, ent.radius, 0, Math.PI * 2);
       ctx.fillStyle = ent.color; ctx.fill();
-      ctx.strokeStyle = '#fff'; ctx.lineWidth = 3; ctx.stroke();
+
+      // Poison stroke
+      ctx.strokeStyle = ent.isPoisoned ? '#ff0000' : '#fff';
+      ctx.lineWidth = ent.isPoisoned ? 4 : 3;
+      ctx.stroke();
+
       if (ent.radius > 15) {
         ctx.fillStyle = 'white'; ctx.strokeStyle = 'black'; ctx.lineWidth = 0.5;
         ctx.font = `bold ${Math.max(10, ent.radius / 2)}px sans-serif`;
@@ -363,7 +428,24 @@ export default function GamePage() {
     ctx.restore();
   };
 
+  // Helper: Am I the Host? (Lowest ID)
+  const isHost = () => {
+    const allIds = [myId, ...Array.from(otherPlayersRef.current.keys())];
+    allIds.sort();
+    return allIds[0] === myId;
+  };
+
   const checkLobbyStart = (channel, deltaTime) => {
+    // Only Host checks for start conditions
+    // But we need to update Timer visually for everyone? 
+    // Actually, let Host drive the timer via broadcasts? 
+    // Or keep independent timers but Host triggers the "GO".
+
+    // Simplest: Host checks "All Ready", then broadcasts "Starting in 3..."
+    // Then after 3s, broadcasts "Start with Data".
+
+    if (!isHost()) return; // Slaves do nothing, just wait for events
+
     // Must have > 1 player
     if (otherPlayersRef.current.size >= 1 && isReadyRef.current) {
       // Check if ALL others are ready
@@ -376,35 +458,78 @@ export default function GamePage() {
         if (!isGameStartingRef.current) {
           isGameStartingRef.current = true;
           lobbyTimerRef.current = 3;
+          // Notify everyone we are counting down
+          channel.send({ type: 'broadcast', event: 'lobby_countdown', payload: { seconds: 3 } });
         } else {
           lobbyTimerRef.current -= (deltaTime / 1000);
+
+          // Send sync ticks occasionally? Or just trust clients?
+          // Let's trust clients for countdown, but Host triggers the FINAL start.
+
           if (lobbyTimerRef.current <= 0) {
-            if (gameStateRef.current !== 'playing') {
-              switchGameState('playing');
-              startNewGame();
-              isGameStartingRef.current = false; // Reset
-              if (gameModeRef.current === 'multi') {
-                botsRef.current = [];
-                initWorld();
-              }
+            // START GAME!
+            // 1. Generate World Data
+            const initialFood = [];
+            for (let i = 0; i < FOOD_COUNT; i++) initialFood.push(createFood());
+
+            const initialViruses = [];
+            for (let i = 0; i < VIRUS_COUNT; i++) initialViruses.push(createVirus());
+
+            const initialBots = [];
+            for (let i = 0; i < 20; i++) { // Always 20 bots in multi
+              initialBots.push({
+                id: 'bot_' + Math.random().toString(36).substr(2, 9),
+                x: Math.random() * WORLD_WIDTH,
+                y: Math.random() * WORLD_HEIGHT,
+                radius: 15 + Math.random() * 20,
+                color: '#888888',
+                targetX: Math.random() * WORLD_WIDTH,
+                targetY: Math.random() * WORLD_HEIGHT,
+                name: 'Bot',
+                changeDirTimer: 0
+              });
             }
+
+            // 2. Broadcast Data
+            channel.send({
+              type: 'broadcast', event: 'match_start',
+              payload: {
+                food: initialFood,
+                viruses: initialViruses,
+                bots: initialBots
+              }
+            });
+
+            // 3. Start Local
+            startHostGame(initialFood, initialViruses, initialBots);
+            isGameStartingRef.current = false;
           }
         }
       } else {
-        // If someone cancelled ready, abort countdown
         if (isGameStartingRef.current) {
           isGameStartingRef.current = false;
-          lobbyTimerRef.current = 3;
+          channel.send({ type: 'broadcast', event: 'lobby_abort', payload: {} });
         }
       }
     } else {
       if (isGameStartingRef.current) {
         isGameStartingRef.current = false;
+        channel.send({ type: 'broadcast', event: 'lobby_abort', payload: {} });
       }
     }
   };
 
+  const startHostGame = (food, viruses, bots) => {
+    switchGameState('playing');
+    startNewGame(false); // don't spawn local bots
+    // Set Refs
+    foodRef.current = food;
+    virusesRef.current = viruses;
+    botsRef.current = bots;
+  };
+
   const createFood = (isJackpot = false) => ({
+    id: Math.random().toString(36).substr(2, 9),
     x: Math.random() * WORLD_WIDTH,
     y: Math.random() * WORLD_HEIGHT,
     color: isJackpot ? '#ffd700' : `hsl(${Math.random() * 360}, 100%, 70%)`,
@@ -438,11 +563,26 @@ export default function GamePage() {
     // Spawn only in Safe Zone
     const f = createFood(true);
     const sz = safeZoneRef.current;
+
+    // Rule 6: Jackpot Score +20 to +40 random
+    // Radius ~ Score. 
+    const jpScore = 20 + Math.random() * 20;
+    f.radius = jpScore; // Visual size = Score? Or area? Usually radius corresponds to score.
+    // Let's set radius = jpScore for simplicity so it ADDS that much roughly.
+    // Actually, createFood sets a default radius. We override.
+
     // Random angle and distance within safe zone
     const angle = Math.random() * Math.PI * 2;
-    const dist = Math.random() * (sz.radius * 0.8); // 80% of current safe zone
+    // Rule 5: Only within CURRENT poison circle
+    // Ensure it spawns strictly inside
+    const dist = Math.random() * (sz.radius * 0.9); // 90% of Safe Zone to be safe
     f.x = sz.x + Math.cos(angle) * dist;
     f.y = sz.y + Math.sin(angle) * dist;
+
+    // Clamp to world just in case SafeZone is bigger than world (start of game)
+    f.x = Math.max(50, Math.min(WORLD_WIDTH - 50, f.x));
+    f.y = Math.max(50, Math.min(WORLD_HEIGHT - 50, f.y));
+
     foodRef.current.push(f);
   };
 
@@ -571,7 +711,13 @@ export default function GamePage() {
     }
   };
 
-  const updateBots = (deltaTime) => {
+  const updateBots = (deltaTime, channel) => {
+    // Only Host runs AI
+    const amHost = isHost(); // Requires current closure access or passed arg? isHost uses refs, so it's fine.
+    // Wait, in Single player we are always host-like.
+    if (gameModeRef.current === 'multi' && !amHost) return;
+
+    // AI Logic ...
     const dt = deltaTime / 1000;
     botsRef.current.forEach(bot => {
       // Simple AI: Move to target, change target if reached
@@ -593,9 +739,106 @@ export default function GamePage() {
       bot.y = Math.max(0, Math.min(WORLD_HEIGHT, bot.y));
 
       bot.changeDirTimer += dt;
-    });
 
-  };
+      // --- Bot Eating Logic ---
+
+      // 1. Eat Food
+      for (let i = foodRef.current.length - 1; i >= 0; i--) {
+        const f = foodRef.current[i];
+        const dx = bot.x - f.x;
+        const dy = bot.y - f.y;
+        if (dx * dx + dy * dy < bot.radius * bot.radius) { // Eat if center inside
+          // Rule: Score = Radius. 
+          // Gain = Food Radius (or area? Food is small). 
+          // Let's assume Food Radius adds explicitly to score? No, usually area.
+          // But User wants "Score presents Volume/Size".
+          // If Food R=5. Bot R=20. Bot Area=400. New Area=425. New R=20.6.
+          // If additive radius: 20+5=25. Area=625. Huge growth.
+          // Normal food should use AREA. Players/Bots use RADIUS logic requested?
+          // "Unified scoring": "Score directly affects volume size".
+          // Let's stick to Area for small food (otherwise 1 pellet = +1 score is huge).
+          // But for Players/Bots, use the requested Percentage Logic.
+
+          // UNLESS: "Unified scoring... don't use other ways for Bot".
+          // Let's use Area addition for Food to be safe/standard.
+          // Bot eats food:
+          const gain = f.isJackpot ? (f.radius * f.radius) : (f.radius * f.radius);
+          bot.radius = Math.sqrt(bot.radius * bot.radius + gain);
+
+          // Remove Food
+          foodRef.current.splice(i, 1);
+          // Broadcast if Multi
+          if (gameModeRef.current === 'multi') {
+            channel?.send({ type: 'broadcast', event: 'food_eaten', payload: { id: f.id } });
+            if (!f.isJackpot) {
+              const newFood = createFood(false);
+              foodRef.current.push(newFood);
+              channel?.send({ type: 'broadcast', event: 'food_spawned', payload: newFood });
+            }
+          } else {
+            if (!f.isJackpot) foodRef.current.push(createFood(false));
+          }
+        }
+      }
+
+      // 2. Eat Players (Host & Clients)
+      // Helper: Check eat
+      const checkEatPlayer = (pId, pCells, isLocal) => {
+        if (!pCells) return;
+        const eatenIds = [];
+        pCells.forEach((pc, idx) => {
+          const dx = bot.x - pc.x;
+          const dy = bot.y - pc.y;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+
+          // Rule 7: Bot needs +5 radius to eat Player
+          if (bot.radius > pc.radius + 5 && dist < bot.radius - pc.radius * 0.4) {
+            // Eat!
+            // Rule 1: Gain 50% of Player Score (Radius)
+            bot.radius += pc.radius * 0.5;
+
+            eatenIds.push(pc.id);
+          }
+        });
+
+        if (eatenIds.length > 0) {
+          if (isLocal) {
+            // Host was eaten
+            // Remove cells locally
+            myPlayerCellsRef.current = myPlayerCellsRef.current.filter(c => !eatenIds.includes(c.id));
+            if (myPlayerCellsRef.current.length === 0) showNotification("You were eaten by a Bot!");
+          } else {
+            // Client was eaten
+            // Broadcast death/eat event
+            channel?.send({ type: 'broadcast', event: 'cells_eaten', payload: { targetId: pId, cellIds: eatenIds } });
+
+            // Also update local ref to remove ghost immediately
+            const p = otherPlayersRef.current.get(pId);
+            if (p && p.cells) {
+              p.cells = p.cells.filter(c => !eatenIds.includes(c.id));
+              otherPlayersRef.current.set(pId, p);
+            }
+          }
+        }
+      };
+
+      // Check Host
+      checkEatPlayer(myId, myPlayerCellsRef.current, true);
+      // Check Clients
+      // Check Clients
+      otherPlayersRef.current.forEach((p, pid) => checkEatPlayer(pid, p.cells, false));
+    }); // Close Bot Loop (forEach)
+
+    // Broadcast Updates (Frequency Throttling should be in loop, but we do naive here)
+    if (gameModeRef.current === 'multi' && amHost && Math.random() < 0.2) { // ~12fps broadcast
+      channel?.send({
+        type: 'broadcast', event: 'bot_update',
+        payload: botsRef.current.map(b => ({
+          id: b.id, x: Math.round(b.x), y: Math.round(b.y), radius: Math.round(b.radius), color: b.color
+        }))
+      });
+    }
+  }; // Close updateBots function
 
 
 
@@ -629,24 +872,44 @@ export default function GamePage() {
     const dt = deltaTime / 1000;
     const sz = safeZoneRef.current;
 
-    myPlayerCellsRef.current.forEach(cell => {
-      // Natural Decay: 0.2% per sec
-      // Mass = r*r. 
-      // NewMass = Mass * (1 - rate*dt)
-      // Approx for radius: r' = r * sqrt(1 - rate*dt) ~ r * (1 - 0.5*rate*dt)
-      let decayRate = 0.002; // 0.2%
+    const totalMass = myPlayerCellsRef.current.reduce((acc, c) => acc + c.radius, 0); // Approx score
 
-      // Poison Zone Penalty
+    myPlayerCellsRef.current.forEach(cell => {
+      // Natural Decay
+      let decayAmount = 0;
+      if (totalMass > 100) decayAmount = 0.8;
+      else if (totalMass > 50) decayAmount = 0.2;
+
+      // Poison Zone Penalty (5x)
       const dist = Math.sqrt(Math.pow(cell.x - sz.x, 2) + Math.pow(cell.y - sz.y, 2));
+      let isPoisoned = false;
+
       if (dist > sz.radius) {
-        decayRate += 0.004; // +200% -> Total 0.6%
+        isPoisoned = true;
+        // New Rule: If score < 50, special forced decay until 10.
+        // Normal Decay Logic (for > 50) calculated above.
+        // If < 50, decayAmount from natural logic is 0. 
+
+        if (totalMass < 50) {
+          // Force 0.5 per sec if poisoned
+          decayAmount = 0.5;
+        } else {
+          // Standard Multiplier Logic
+          if (decayAmount === 0) decayAmount = 1.0;
+          else decayAmount *= 5; // 5x penalty
+        }
+
         // Visual cue?
-        if (Math.random() < 0.1) addEffect(cell.x, cell.y, "POISON!", "purple");
+        // if (Math.random() < 0.1) addEffect(cell.x, cell.y, "POISON!", "purple");
       }
 
-      const oldMass = cell.radius * cell.radius;
-      const newMass = oldMass * (1 - decayRate * dt);
-      if (newMass > 100) cell.radius = Math.sqrt(newMass); // Don't decay below 10 mass
+      // Store poison state for visual shake
+      cell.isPoisoned = isPoisoned;
+
+      if (decayAmount > 0) {
+        cell.radius -= decayAmount * dt;
+        if (cell.radius < 10) cell.radius = 10; // Floor at 10 (or 5? User said 'until 10')
+      }
     });
   };
 
@@ -699,18 +962,52 @@ export default function GamePage() {
           // Let's stick to strict: dist < cell.radius - f.radius * 0.5 (must cover mostly)
 
           if (dx * dx + dy * dy < cell.radius * cell.radius) { // Center of food inside player
-            const gain = f.isJackpot ? 1000 : f.radius * f.radius; // Area gain
-            const newArea = cell.radius * cell.radius + gain;
-            cell.radius = Math.sqrt(newArea);
+            // Rule 6: Jackpot score is its radius (20-40)
+            // Food gain = Area of food.
+            const foodArea = f.radius * f.radius;
+            // If Jackpot, valid gain is its area? 
+            // User said: "+20~+40分區間". If Score = Radius, then gain should increase radius by X?
+            // "RecalcScore" sums radius. So if we want +20 Score, we need radius += 20 ? 
+            // Area addition: R_new = sqrt(R^2 + r^2). This yields much less than r linear addition.
+            // If we want +20 LINEAR score: cell.radius += 20.
+            // Let's assume +Score means +Radius for Jackpot.
+
+            if (f.isJackpot) {
+              cell.radius += f.radius; // Direct Score Add
+            } else {
+              // Normal food
+              const gain = f.radius * f.radius;
+              const newArea = cell.radius * cell.radius + gain;
+              cell.radius = Math.sqrt(newArea);
+            }
 
             if (f.isJackpot) {
               showNotification("🎰 JACKPOT! +MASS 🎰");
               addEffect(cell.x, cell.y, "+JACKPOT", "gold");
             }
 
+            // Remove Locally
             foodRef.current.splice(i, 1);
-            // Respawn normal food immediately, Jackpot managed by timer
-            if (!f.isJackpot) foodRef.current.push(createFood(false));
+
+            // Broadcast Eat
+            if (gameModeRef.current === 'multi') {
+              channel.send({ type: 'broadcast', event: 'food_eaten', payload: { id: f.id } });
+            }
+
+            // Respawn Logic
+            if (!f.isJackpot) {
+              // In Multi, only Host respawns
+              if (gameModeRef.current === 'multi') {
+                if (isHost()) {
+                  const newFood = createFood(false);
+                  foodRef.current.push(newFood);
+                  channel.send({ type: 'broadcast', event: 'food_spawned', payload: newFood });
+                }
+              } else {
+                // Single
+                foodRef.current.push(createFood(false));
+              }
+            }
             break;
           }
         }
@@ -786,15 +1083,16 @@ export default function GamePage() {
         const dy = cell.y - bot.y;
         const dist = Math.sqrt(dx * dx + dy * dy);
 
-        const dist = Math.sqrt(dx * dx + dy * dy);
+        // Rule 7: Need +5 radius, not 1.1x
+        // cell.radius > bot.radius + 5
+        if (cell.radius > bot.radius + 5 && dist < cell.radius - bot.radius * 0.4) {
+          // Rule 2: Gain 25% of BOT Score (Radius) - Additive
+          // User request: Score 30 -> eat gives ~7-8. 
+          // Previous logic was Area based which is huge or tiny depending on R.
+          // New Logic: myRadius += botRadius * 0.25.
 
-        // Relaxed Eating: Distance < My Radius (Center of Bot is inside Me)
-        // And I am bigger (1.1x)
-        if (cell.radius > bot.radius * 1.1 && dist < cell.radius - bot.radius * 0.4) {
-          // Eat Bot (Gain 50% Mass)
-          const gain = (bot.radius * bot.radius) * 0.5;
-          const newArea = cell.radius * cell.radius + gain;
-          cell.radius = Math.sqrt(newArea);
+          cell.radius += bot.radius * 0.25;
+
           botsRef.current.splice(i, 1);
           addEffect(cell.x, cell.y, "CRUNCH", "red");
           // Respawn bot
@@ -816,8 +1114,8 @@ export default function GamePage() {
 
     otherPlayersRef.current.forEach((p, pid) => {
       if (!p.cells) return;
-      let eatenIndices = [];
-      p.cells.forEach((enemyCell, idx) => {
+      let eatenCellIds = []; // Track IDs instead of indices
+      p.cells.forEach((enemyCell) => {
         for (const cell of myCells) {
           const dx = cell.x - enemyCell.x;
           const dy = cell.y - enemyCell.y;
@@ -829,19 +1127,23 @@ export default function GamePage() {
           // Center of enemy inside My Radius?
           // dist < cell.radius - enemyCell.radius * 0.2
 
-          if (cell.radius > enemyCell.radius * 1.1 && dist < cell.radius - enemyCell.radius * 0.2) {
+          // Rule 7: Need +5 radius, not 1.1x
+          if (cell.radius > enemyCell.radius + 5 && dist < cell.radius - enemyCell.radius * 0.2) {
             // EAT
             const gain = (enemyCell.radius * enemyCell.radius) * 0.5;
             const newArea = cell.radius * cell.radius + gain;
             cell.radius = Math.sqrt(newArea);
-            eatenIndices.push(idx);
+
+            // Push ID if available, otherwise fallback might fail (but we generated IDs in createInitialCell)
+            if (enemyCell.id) eatenCellIds.push(enemyCell.id);
+
             addEffect(cell.x, cell.y, "KILL!", "red");
             break;
           }
         }
       });
 
-      if (eatenIndices.length > 0) {
+      if (eatenCellIds.length > 0) {
         // Remove eaten cells from local view of enemy
         // We can't easily force them to die unless we send an event
         // Send "kill_request"? 
@@ -853,7 +1155,7 @@ export default function GamePage() {
         const targetId = p.id;
         channel.send({
           type: 'broadcast', event: 'cells_eaten',
-          payload: { targetId, indices: eatenIndices, eaterId: myId }
+          payload: { targetId, cellIds: eatenCellIds, eaterId: myId }
         });
 
         // Client-side prediction delete
@@ -1109,24 +1411,72 @@ export default function GamePage() {
         if (gameModeRef.current === 'single') return; // Ignore in single player
         // If I am the target, I lost cells!
         if (payload.payload.targetId === myId) {
-          const indices = payload.payload.indices;
-          // Remove my cells
-          // Note: indices might be stale if array shifted? 
-          // Safer to match by ID if we had cell IDs. We do! c.id
-          // But 'indices' sent from attacker is based on their snapshot.
-          // Quick fix: attacker sends cell IDs or we just pop simplisticly?
-          // BETTER: just remove N cells.
+          const { cellIds } = payload.payload;
 
-          // Actually, if I lose all cells, I die.
-          if (myPlayerCellsRef.current.length <= indices.length) {
-            myPlayerCellsRef.current = [];
-            showNotification("OM NOM NOM! YOU WERE EATEN!");
-          } else {
-            // Remove smallest cells as fallback or try to remove specific
-            myPlayerCellsRef.current.splice(0, indices.length);
-            showNotification("OUCH! PART OF YOU WAS EATEN!");
+          if (cellIds && cellIds.length > 0) {
+            // Robust removal by ID
+            myPlayerCellsRef.current = myPlayerCellsRef.current.filter(c => !cellIds.includes(c.id));
+
+            if (myPlayerCellsRef.current.length === 0) {
+              showNotification("OM NOM NOM! YOU WERE EATEN!");
+            } else {
+              showNotification("OUCH! PART OF YOU WAS EATEN!");
+            }
           }
         }
+      })
+      .on('broadcast', { event: 'match_start' }, (payload) => {
+        if (gameModeRef.current === 'single') return;
+
+        // Client receives World Data
+        const { food, viruses, bots } = payload.payload;
+        foodRef.current = food || [];
+        virusesRef.current = viruses || [];
+        botsRef.current = bots || [];
+
+        switchGameState('playing');
+        startNewGame(false); // Do not spawn bots locally
+      })
+      .on('broadcast', { event: 'lobby_countdown' }, (payload) => {
+        if (gameModeRef.current === 'single') return;
+        isGameStartingRef.current = true;
+        lobbyTimerRef.current = payload.payload.seconds;
+      })
+      .on('broadcast', { event: 'lobby_abort' }, (payload) => {
+        isGameStartingRef.current = false;
+      })
+      .on('broadcast', { event: 'bot_update' }, (payload) => {
+        // Clients just update bot info
+        if (gameModeRef.current === 'single') return;
+
+        // payload: { id, x, y, radius, color... }
+        // We might receive full list or partial updates. 
+        // For simple sync: Host sends array of essential bot data?
+        // Or individual? Individual is spammy. Array is better.
+
+        const botDataList = payload.payload;
+        if (Array.isArray(botDataList)) {
+          // Update local refs
+          // Naive replace or merge? Replace is easiest for position sync
+          botsRef.current = botDataList;
+        }
+      })
+      .on('broadcast', { event: 'food_spawned' }, (payload) => {
+        if (gameModeRef.current === 'single') return;
+        foodRef.current.push(payload.payload);
+      })
+      .on('broadcast', { event: 'food_eaten' }, (payload) => {
+        if (gameModeRef.current === 'single') return;
+        const { id } = payload.payload;
+        // Safe removal:
+        foodRef.current = foodRef.current.filter(f => f.id !== id);
+      })
+      .on('broadcast', { event: 'match_time_update' }, (payload) => {
+        if (gameModeRef.current === 'single') return;
+        const { time } = payload.payload;
+        // Sync Time
+        timeLeftRef.current = time;
+        setTimeLeft(time);
       })
       .subscribe();
 
@@ -1136,7 +1486,8 @@ export default function GamePage() {
     let lastTime = performance.now();
     let frameCount = 0;
     let lastFpsTime = lastTime;
-    let lastBroadcastTime = 0;
+    let lastGameBroadcastTime = 0;
+    let lastLobbyBroadcastTime = 0;
     let jackpotTimer = 0;
 
     const animate = (time) => {
@@ -1150,8 +1501,7 @@ export default function GamePage() {
         if (currentGS === 'playing') {
           updateMyCells(deltaTime);
           updateEjectedMass(deltaTime);
-          // if (mode === 'single') updateBots(deltaTime); // ONLY UPDATE BOTS IN SINGLE
-          updateBots(deltaTime); // Enable Bots in Multi too (Local)
+          updateBots(deltaTime, channel); // Pass channel for Host Broadcasting
 
           checkCollisions(myId, channel);
           recalcScore();
@@ -1163,11 +1513,6 @@ export default function GamePage() {
           updateSafeZone(timeLeftRef.current);
           applyDecay(deltaTime);
 
-          // Zone Warning
-          // if (Math.abs(timeLeftRef.current - 130) < 0.1) { // At 130s left (50s elapsed)
-          //   showNotification("⚠️ ZONE SHRINKING IN 10S ⚠️");
-          // }
-
           jackpotTimer += deltaTime;
           if (jackpotTimer > 15000) {
             if (Math.random() < 0.8) {
@@ -1177,21 +1522,24 @@ export default function GamePage() {
             jackpotTimer = 0;
           }
         } else if (currentGS === 'lobby') {
-          if (time - lastBroadcastTime > 1000) {
+          // Lobby Updates
+          if (time - lastLobbyBroadcastTime > 1000) {
             const myName = `Player ${myId.substr(0, 4)}`;
             channel.send({
               type: 'broadcast', event: 'lobby_update',
               payload: { id: myId, name: nicknameRef.current || myName, ready: isReadyRef.current }
             });
-            lastBroadcastTime = time;
+            lastLobbyBroadcastTime = time;
           }
           checkLobbyStart(channel, deltaTime);
-          setDebugInfo(prev => ({ ...prev, tick: (prev.tick || 0) + 1 }));
+
+          // Force UI update for lobby count
+          setDebugInfo(prev => ({ ...prev, tick: (prev.tick || 0) + 1, players: otherPlayersRef.current.size + 1 }));
         }
 
 
-        // Broadcast ONLY in Multi
-        if (mode === 'multi' && currentGS === 'playing' && time - lastBroadcastTime > 50) {
+        // Broadcast ONLY in Multi Playing
+        if (mode === 'multi' && currentGS === 'playing' && time - lastGameBroadcastTime > 50) {
           channel.send({
             type: 'broadcast', event: 'player_update',
             payload: {
@@ -1200,11 +1548,12 @@ export default function GamePage() {
               name: nicknameRef.current || `Player ${myId.substr(0, 4)}`,
               cells: myPlayerCellsRef.current.map(c => ({
                 id: c.id, x: Math.round(c.x), y: Math.round(c.y),
-                radius: c.radius, color: c.color, name: c.name
+                radius: c.radius, color: c.color, name: c.name,
+                isPoisoned: c.isPoisoned // Sync poison state
               }))
             },
           });
-          lastBroadcastTime = time;
+          lastGameBroadcastTime = time;
         }
 
         // Cleanup
@@ -1224,15 +1573,42 @@ export default function GamePage() {
           updateLeaderboard();
 
           if (currentGS === 'playing') {
-            timeLeftRef.current -= 1;
-            setTimeLeft(timeLeftRef.current);
+            // Host decreases time and broadcasts it
+            // Clients just listen (listener handles timeLeftRef update), 
+            // BUT for smoothness, clients can theoretically decrease locally too.
+            // Problem: Double decrement if we do both?
+            // Solution: Host is authority. Clients rely on sync OR local decrement if sync logic handles drift.
+            // Simplest: Host decrements and sends. Clients ONLY set from sync?
+            // "3 minutes didn't count down" -> implies sync missing.
+
+            // Logic Change for Multi:
+            if (gameModeRef.current === 'single') {
+              timeLeftRef.current -= 1;
+              setTimeLeft(timeLeftRef.current);
+            } else {
+              // Multi:
+              if (isHost()) {
+                timeLeftRef.current -= 1;
+                setTimeLeft(timeLeftRef.current);
+                // Broadcast
+                channel.send({ type: 'broadcast', event: 'match_time_update', payload: { time: timeLeftRef.current } });
+              } else {
+                // Client: Interpolate or just wait?
+                // If we only wait for 1s broadcast, timer feels jerky or laggy?
+                // Actually, 1s tick is fine for a game timer.
+                // But let's allow local decrement for smoothness, and overwrite on sync.
+                timeLeftRef.current -= 1;
+                setTimeLeft(timeLeftRef.current);
+              }
+            }
+
             if (timeLeftRef.current <= 0) {
               if (gameModeRef.current === 'single') {
                 // Single Player Game Over
                 switchGameState('gameover');
               } else {
-                // Multi: only show if we are playing?
-                // Actually multi relies on server/lobby sync, but client timer dictates UI
+                // Multi: HOST triggers Game Over for everyone?
+                // Or everyone sees 0 and ends self.
                 switchGameState('gameover');
               }
             }
@@ -1244,22 +1620,66 @@ export default function GamePage() {
               if (!hasDiedRef.current) {
                 hasDiedRef.current = true;
                 respawnTimerRef.current = 10; // 10s Cooldown
+                // Save score for penalty
+                // If Score = Radius Sum.
+                // We revive with 1 cell ?
+                // Logic: Revive with 70% of previous total radius?
+                savedScoreRef.current = scoreRef.current;
               }
             }
           }
 
           if (respawnTimerRef.current > 0) {
-            respawnTimerRef.current -= (time - lastTime) / 1000; // Oops, deltaTime is above. 
-            // We are in animate loop, we can use deltaTime or simple 1s decrement here? 
-            // Use time-lastFpsTime which is ~1000ms.
-            // Better: use deltaTime from top of animate.
-            // But we are inside the 1sec interval block here.
-            // So we decrement by 1.
             respawnTimerRef.current -= 1;
+            if (respawnTimerRef.current <= 0) {
+              // Trigger Respawn
+              hasDiedRef.current = false;
+              const penaltyRadius = Math.max(INITIAL_RADIUS, savedScoreRef.current * 0.7);
+
+              let spawnX, spawnY;
+              // If Poison Circle logic active (Time < 1 min? Or 130s? User check: "毒圈階段")
+              // Poison starts at 1:00 remaining? Code says `updateSafeZone`.
+              // Let's check `timeLeftRef`. Using 60s as shrinking phase start?
+              // Or if SafeZone < World?
+              // Let's safely assume if timeLeft < GAME_DURATION - 60 (i.e. late game) 
+              // or just check SafeZone radius < 4000.
+              const sz = safeZoneRef.current;
+              if (sz.radius < 4000) {
+                // Spawn inside Safe Zone
+                const angle = Math.random() * Math.PI * 2;
+                const dist = Math.random() * (sz.radius * 0.8);
+                spawnX = sz.x + Math.cos(angle) * dist;
+                spawnY = sz.y + Math.sin(angle) * dist;
+              } else {
+                // Random
+                spawnX = Math.random() * WORLD_WIDTH;
+                spawnY = Math.random() * WORLD_HEIGHT;
+              }
+
+              // Create Cell
+              myPlayerCellsRef.current.push({
+                id: myId, // Single cell ID or unique sub-ID? `myId` is player ID. Cells need unique IDs?
+                // createInitialCell logic handles it usually.
+                // Let's inline logic or use helper if available. 
+                // Helper `createInitialCell` doesn't exist? It was used in virus split.
+                // Ah, I need to check if I have `createInitialCell`.
+                // I'll inline standard init.
+                id: myId + '_respawn',
+                x: spawnX, y: spawnY,
+                radius: penaltyRadius,
+                color: `hsl(${Math.random() * 360}, 100%, 50%)`,
+                name: nicknameRef.current || 'Player',
+                canMerge: true, mergeTimer: 0,
+                boostX: 0, boostY: 0
+              });
+              // Notification
+              showNotification("RESPAWNED!");
+            }
           }
+
+          frameCount = 0;
+          lastFpsTime = time;
         }
-        frameCount = 0;
-        lastFpsTime = time;
       } catch (err) {
         console.error("Game Loop Error:", err);
       }
@@ -1396,26 +1816,25 @@ export default function GamePage() {
           </div>
         </div>
       )}
-    </div>
 
-    {
-    isLoading && (
-      <div style={{
-        position: 'absolute', top: 0, left: 0, width: '100%', height: '100%',
-        background: '#050510', zIndex: 9999, display: 'flex', flexDirection: 'column',
-        justifyContent: 'center', alignItems: 'center', color: 'white'
-      }}>
-        <h1 style={{ fontSize: '3rem', marginBottom: '20px', color: '#00ff00' }}>LOADING...</h1>
-        <div style={{ width: '300px', height: '10px', background: '#333', borderRadius: '5px' }}>
-          <div style={{ width: `${loadingProgress}%`, height: '100%', background: '#00ff00', borderRadius: '5px', transition: 'width 0.1s' }} />
-        </div>
-        <p style={{ marginTop: '10px', color: '#aaa' }}>Initializing World Entities...</p>
-      </div>
-    )
-  }
+      {
+        isLoading && (
+          <div style={{
+            position: 'absolute', top: 0, left: 0, width: '100%', height: '100%',
+            background: '#050510', zIndex: 9999, display: 'flex', flexDirection: 'column',
+            justifyContent: 'center', alignItems: 'center', color: 'white'
+          }}>
+            <h1 style={{ fontSize: '3rem', marginBottom: '20px', color: '#00ff00' }}>LOADING...</h1>
+            <div style={{ width: '300px', height: '10px', background: '#333', borderRadius: '5px' }}>
+              <div style={{ width: `${loadingProgress}%`, height: '100%', background: '#00ff00', borderRadius: '5px', transition: 'width 0.1s' }} />
+            </div>
+            <p style={{ marginTop: '10px', color: '#aaa' }}>Initializing World Entities...</p>
+          </div>
+        )
+      }
 
-  </div >
-);
+    </div >
+  );
 }
 
 const overlayStyle = { position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', background: 'rgba(10,10,20, 0.9)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'white', zIndex: 10 };
