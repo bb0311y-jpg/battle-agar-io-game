@@ -72,3 +72,97 @@ Recovered project state after folder deletion. Confirmed that local git history 
 *   **Documentation**: It is crucial to maintain `PROJECT_STATUS.md`. This file acts as the bridge between sessions.
 *   **Workflow**: Before signing off, always generate the "Startup Phrase" and place it in `PROJECT_STATUS.md`.
 *   **Goal**: Ensure the user can simply copy-paste the startup phrase to resume work instantly.
+
+## Date: 2026-01-18 (Session 4 - Part 2) [Multiplayer Logic Fix for v1.5]
+
+### 📝 Change Log
+| Type | Description | Status |
+| :--- | :--- | :--- |
+| **Fix** | Added connection status indicator (Debug Mode) to Lobby to diagnose socket issues. | Done |
+| **Fix** | Renamed Supabase channel to `room_v1_5` to isolate versions and prevent ghost messages. | Done |
+| **Fix** | Verified v1.5 deployment via Force Push to resolve deployment sync issues. | Done |
+| **Note**| If user reports `CHANNEL_ERROR` in lobby, we need to check Supabase Keys or RLS policies. | Info |
+
+### 🧠 Note to Self (Review & Lessons)
+*   **Deployment**: Version mismatch means Vercel deployment stalled. Always force push with a clear commit if in doubt.
+*   **Debugging**: Multiplayer issues are often invisible. Adding a visible "Connection Status" UI is the best first step.
+*   **Isolation**: When upgrading game version significantly, change the `channel` name (e.g., `room_v1.5`) to avoid old clients confusing new logic.
+
+## Date: 2026-01-18 (Session 4 - Part 3) [Lobby Presence Fix]
+
+### 📝 Change Log
+| Type | Description | Status |
+| :--- | :--- | :--- |
+| **Fix** | Replaced unreliable manual broadcast loop with **Supabase Presence** for Lobby Sync. | Done |
+| **Fix** | Implemented `channel.track()` to automatically sync player list on join. | Done |
+| **Fix** | Forced Vercel deployment of v1.5.1 presence fix. | Done |
+
+### 🧠 Note to Self (Review & Lessons)
+*   **Presence vs Broadcast**: For "Who is Online" lists, ALWAYS use `Presence`. Manual broadcasts are prone to timing issues and packet loss, leading to "ghost" empty lobbies.
+*   **Verification**: If Presence works, both windows will show "2 connected" instantly without waiting for a broadcast tick.
+
+## Date: 2026-01-18 (Session 4 - Part 4) [Lobby Presence Key Fix]
+
+### 📝 Change Log
+| Type | Description | Status |
+| :--- | :--- | :--- |
+| **Fix** | Decoupled Supabase Presence Key from User ID. Now uses server-assigned UUIDs for keys but filters users by `payload.id`. | Done |
+| **Fix** | Resolved issue where `channel.track()` with a custom key might isolate the user upon update. | Done |
+| **Fix** | Forced Vercel deployment of v1.5.1 key fix. | Done |
+
+### 🧠 Note to Self (Review & Lessons)
+*   **Presence Keys**: Do not manually set `presence: { key: ... }` unless strictly necessary. It can cause unexpected behavior when calling `track()` if the internal state mapping conflicts.
+*   **Robustness**: Always filter presence lists by the *data content* (payload.id), not the *transport key*, to be resilient against connection re-keying.
+
+## Date: 2026-01-18 (Session 4 - Part 5) [Lobby Timeout Fix]
+
+### 📝 Change Log
+| Type | Description | Status |
+| :--- | :--- | :--- |
+| **Fix** | Restricted the "Player Timeout Cleanup" loop (3000ms) to run ONLY during `playing` mode. | Done |
+| **Fix** | Prevented Lobby players from disappearing after 3 seconds due to lack of constant heartbeat in Presence mode. | Done |
+| **Fix** | Force deployed v1.5.1 (Patch 3). | Done |
+
+### 🧠 Note to Self (Review & Lessons)
+*   **Timeout Logic**: Do not apply "Active Gameplay" timeout logic (which expects 20fps updates) to "Passive Lobby" state (which expects event-based updates).
+*   **Presence**: Presence is stateful; if the server says they are there, they are there. Do not second-guess it with a local timer unless you implement a manual heartbeat.
+
+## Date: 2026-01-18 (Session 4 - Part 6) [Ready State Sync Fix]
+
+### 📝 Change Log
+| Type | Description | Status |
+| :--- | :--- | :--- |
+| **Fix** | Added `updatedAt` timestamp to Presence Payload. | Done |
+| **Fix** | Updated `sync` logic to sort by `updatedAt` and pick the latest entry, ensuring Ready state updates are not overwritten by stale data. | Done |
+| **Fix** | Force deployed v1.5.1 (Patch 4). | Done |
+
+### 🧠 Note to Self (Review & Lessons)
+*   **Presence Conflict Resolution**: Supabase Presence is "eventually consistent" and may send multiple entries for the same user (if keys differ or sessions overlap). Always use a timestamp to resolve conflicts and pick the latest state.
+*   **Debugging**: Visual discrepancies (one side sees Waiting, other Ready) usually mean the update packet was received but discarded or overwritten by older data.
+
+## Date: 2026-01-18 (Session 4 - Part 7) [Lobby Broadcast Fallback]
+
+### 📝 Change Log
+| Type | Description | Status |
+| :--- | :--- | :--- |
+| **Fix** | Implemented a **Hybrid Sync Strategy**: Uses `Presence` primarily, but falls back to `manual broadcast` (`force_lobby_status`) if Presence fails (e.g., due to Auth restrictions). | Done |
+| **Fix** | Fixed critical syntax error in `on()` chaining. | Done |
+| **Fix** | Identified that "Anonymous Auth disabled" in Supabase might be blocking `track()`, so manual broadcast bypasses this limitation. | Done |
+| **Fix** | Force deployed v1.5.1 (Patch 5). | Done |
+
+### 🧠 Note to Self (Review & Lessons)
+*   **Supabase Auth Limits**: `channel.track()` often requires an authenticated user (even anonymous). If Anon Auth is disabled in Supabase dashboard, `track()` fails silently or with log errors.
+*   **Fallback**: Using `channel.send` (Broadcast) is permission-less (if RLS allows) and works even if Presence is blocked. This "Double Tap" ensures reliability.
+
+## Date: 2026-01-18 (Session 4 - Part 8) [Smart Merge - Final Sync Fix]
+
+### 📝 Change Log
+| Type | Description | Status |
+| :--- | :--- | :--- |
+| **Fix** | Implemented **Smart Merge Logic** in Presence Sync. | Done |
+| **Fix** | Prioritize `localData` (from Broadcast) over `serverData` (from Presence) if local timestamp is newer. | Done |
+| **Fix** | Prevented stale server presence states (e.g., waiting for auth) from overwriting fresh local states (e.g., ready via broadcast). | Done |
+| **Fix** | Force deployed v1.5.1 (Patch 6). | Done |
+
+### 🧠 Note to Self (Review & Lessons)
+*   **Race Conditions**: When using two data sources (Presence + Broadcast) for the same entity, you MUST have a conflict resolution strategy (e.g., Timestamp-based Last Write Wins). Simply overwriting one with the other will cause flickering and state reversion.
