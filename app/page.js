@@ -1372,7 +1372,7 @@ export default function GamePage() {
     const channel = supabase.channel('room_v1_5', {
       config: {
         broadcast: { self: false, ack: false },
-        presence: { key: myId }
+        presence: {}
       },
     });
 
@@ -1385,7 +1385,7 @@ export default function GamePage() {
         if (id !== myId) {
           const prev = otherPlayersRef.current.get(id) || {};
           // If we see a player sending updates with cells, they are playing.
-          // Improve Lobby Sync: If we are in lobby and ready, and we see someone playing, 
+          // Improve Lobby Sync: If we are in lobby and ready, and we see someone playing,
           // we should probably ensure our game starts too (failsafe).
           if (gameStateRef.current === 'lobby' && isReadyRef.current && cells && cells.length > 0) {
             // Optional: trigger start if stuck?
@@ -1404,16 +1404,17 @@ export default function GamePage() {
         // Sync Presence State to otherPlayersRef
         // State format: { "id": [ { id, name, ready, ... } ], ... }
 
-        // Mark all current as "stale" or just clear and rebuild?
-        // Rebuild is safer for identical sync.
         const newPlayers = new Map();
 
         for (const key in state) {
-          if (key === myId) continue; // Skip self
+          // We used to filter by key === myId.
+          // Now we check the payload ID to be safe if keys change.
           const userData = state[key][0]; // Take most recent presence data
-          if (userData) {
-            newPlayers.set(key, { ...userData, lastUpdate: Date.now() });
-          }
+          if (!userData) continue;
+
+          if (userData.id === myId) continue; // Skip self based on Payload ID
+
+          newPlayers.set(userData.id, { ...userData, lastUpdate: Date.now() });
         }
 
         otherPlayersRef.current = newPlayers;
