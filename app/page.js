@@ -42,6 +42,7 @@ export default function GamePage() {
 
   const [isLoading, setIsLoading] = useState(true); // Mask initial lag
   const [loadingProgress, setLoadingProgress] = useState(0);
+  const [connectionStatus, setConnectionStatus] = useState('DISCONNECTED'); // 'SUBSCRIBED', 'TIMED_OUT', 'CLOSED', 'CHANNEL_ERROR'
 
   // World State
   const myPlayerCellsRef = useRef([]);
@@ -1353,7 +1354,7 @@ export default function GamePage() {
     window.addEventListener('keydown', handleKeyDown);
 
     // Network Setup
-    const channel = supabase.channel('room_1', {
+    const channel = supabase.channel('room_v1_5', {
       config: { broadcast: { self: false, ack: false } },
     });
 
@@ -1478,7 +1479,13 @@ export default function GamePage() {
         timeLeftRef.current = time;
         setTimeLeft(time);
       })
-      .subscribe();
+      .subscribe((status, err) => {
+        console.log("Supabase Channel Status:", status, err);
+        setConnectionStatus(status);
+        if (status === 'CHANNEL_ERROR') {
+          showNotification("Connection Error: " + (err?.message || 'Unknown'));
+        }
+      });
 
     channelRef.current = channel;
 
@@ -1755,13 +1762,23 @@ export default function GamePage() {
             {isReady ? 'CANCEL READY' : 'READY UP!'}
           </button>
           <div style={{ color: '#aaa', marginTop: '10px' }}>Needs at least 2 players to start</div>
+
+          <div style={{ marginTop: '20px', padding: '10px', borderRadius: '5px', background: 'rgba(0,0,0,0.5)' }}>
+            <span style={{ color: '#aaa', fontSize: '12px' }}>Network Status: </span>
+            <span style={{
+              color: connectionStatus === 'SUBSCRIBED' ? '#0f0' : 'red',
+              fontWeight: 'bold'
+            }}>
+              {connectionStatus}
+            </span>
+          </div>
         </div>
       )}
 
       {gameState === 'menu' && (
         <div style={overlayStyle}>
-          <h1 style={{ fontSize: '4rem', color: '#00ff00', textShadow: '0 0 20px #00ff00' }}>GLOW BATTLE v1.5</h1>
-          <div style={{ color: '#aaa', marginBottom: '20px' }}>Current Version: 3 MIN UPDATE</div>
+          <h1 style={{ fontSize: '4rem', color: '#00ff00', textShadow: '0 0 20px #00ff00' }}>GLOW BATTLE v1.5.1</h1>
+          <div style={{ color: '#aaa', marginBottom: '20px' }}>Current Version: MP FIX + DEBUG</div>
           <input type="text" placeholder="Enter Nickname" value={nickname} onChange={e => setNicknameWrapper(e.target.value)}
             style={{ padding: '15px', fontSize: '1.5rem', borderRadius: '5px', border: 'none', textAlign: 'center', marginBottom: '20px' }} maxLength={10} />
 
