@@ -1584,8 +1584,12 @@ export default function GamePage() {
 
         // Cleanup
         const now = Date.now();
-        for (const [pid, p] of otherPlayersRef.current.entries()) {
-          if (now - p.lastUpdate > 3000) otherPlayersRef.current.delete(pid);
+        // Only cleanup timed-out players in PLAYING mode (where we expect constant broadcasts).
+        // In LOBBY, we rely on Supabase Presence (which doesn't heartbeat constantly), so we should NOT timeout players.
+        if (currentGS === 'playing') {
+          for (const [pid, p] of otherPlayersRef.current.entries()) {
+            if (now - p.lastUpdate > 3000) otherPlayersRef.current.delete(pid);
+          }
         }
 
         if (currentGS === 'playing' || currentGS === 'gameover' || currentGS === 'lobby') {
