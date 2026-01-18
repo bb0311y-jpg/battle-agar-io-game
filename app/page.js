@@ -1415,32 +1415,30 @@ export default function GamePage() {
         // Sync Presence State to otherPlayersRef
         // State format: { "id": [ { id, name, ready, ... } ], ... }
 
+        const currentPlayers = otherPlayersRef.current;
         const newPlayers = new Map();
-
-
-        // Fallback: If 'updatedAt' is missing (old client) or we suffer from strict Presence issues, 
-        // trust the 'state' map. 
-        // And importantly: Listen for manual broadcasts of 'ready' as a backup?
-        // Actually, let's just stick to the sorted logic.
 
         for (const key in state) {
           const entries = state[key];
           if (!entries || entries.length === 0) continue;
 
-          // Sort by updatedAt if available, else take last
-          // Provide fallback for sorting if updatedAt is missing
-          const sorted = entries.sort((a, b) => {
-            const tA = a.updatedAt || 0;
-            const tB = b.updatedAt || 0;
-            return tB - tA;
-          });
+          // 1. Get best Server Data
+          const sorted = entries.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+          const serverData = sorted[0];
 
-          const userData = sorted[0]; // Newest
+          if (!serverData) continue;
+          if (serverData.id === myId) continue; // Skip self
 
-          if (!userData) continue;
-          if (userData.id === myId) continue; // Skip self
+          // 2. Check Local Cache (Smart Merge)
+          const localData = currentPlayers.get(serverData.id);
 
-          newPlayers.set(userData.id, { ...userData, lastUpdate: Date.now() });
+          if (localData && (localData.updatedAt || 0) > (serverData.updatedAt || 0)) {
+            // Local is fresher, keep it.
+            newPlayers.set(serverData.id, localData);
+          } else {
+            // Server is newer.
+            newPlayers.set(serverData.id, { ...serverData, lastUpdate: Date.now() });
+          }
         }
 
         otherPlayersRef.current = newPlayers;
