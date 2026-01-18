@@ -1210,7 +1210,8 @@ export default function GamePage() {
       id: myId,
       name: name,
       ready: false,
-      status: 'lobby'
+      status: 'lobby',
+      updatedAt: Date.now()
     });
   };
 
@@ -1223,7 +1224,8 @@ export default function GamePage() {
         id: myId,
         name: nicknameRef.current || `Player ${myId.substr(0, 4)}`,
         ready: newState,
-        status: 'lobby'
+        status: 'lobby',
+        updatedAt: Date.now()
       });
     }
   };
@@ -1407,12 +1409,18 @@ export default function GamePage() {
         const newPlayers = new Map();
 
         for (const key in state) {
-          // We used to filter by key === myId.
-          // Now we check the payload ID to be safe if keys change.
-          const userData = state[key][0]; // Take most recent presence data
-          if (!userData) continue;
+          // Provide robustness against zombie descriptors or out-of-order updates
+          // We scan ALL entries for this key, effectively merging or picking latest
+          const entries = state[key];
+          if (!entries || entries.length === 0) continue;
 
-          if (userData.id === myId) continue; // Skip self based on Payload ID
+          // Sort by updatedAt if available, else take last
+          // We need to ensure we track 'updatedAt' in our payload
+          const sorted = entries.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+          const userData = sorted[0]; // Newest
+
+          if (!userData) continue;
+          if (userData.id === myId) continue; // Skip self based on Payload ID (Safety)
 
           newPlayers.set(userData.id, { ...userData, lastUpdate: Date.now() });
         }
