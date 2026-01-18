@@ -1204,13 +1204,28 @@ export default function GamePage() {
     // Spawn Bots for local flavor in Multi too
     botsRef.current = [];
     for (let i = 0; i < 20; i++) spawnBot();
+
+    // Track Presence
+    channelRef.current?.track({
+      id: myId,
+      name: name,
+      ready: false,
+      status: 'lobby'
+    });
   };
 
   // Controls
   const toggleReady = () => {
-    // Determine new state from REF to be safe
     const newState = !isReadyRef.current;
     setIsReadyWrapper(newState);
+    if (gameModeRef.current === 'multi') {
+      channelRef.current?.track({
+        id: myId,
+        name: nicknameRef.current || `Player ${myId.substr(0, 4)}`,
+        ready: newState,
+        status: 'lobby'
+      });
+    }
   };
 
   const splitCells = (dirX, dirY) => {
@@ -1355,7 +1370,10 @@ export default function GamePage() {
 
     // Network Setup
     const channel = supabase.channel('room_v1_5', {
-      config: { broadcast: { self: false, ack: false } },
+      config: {
+        broadcast: { self: false, ack: false },
+        presence: { key: myId }
+      },
     });
 
     channel
@@ -1381,23 +1399,26 @@ export default function GamePage() {
           });
         }
       })
-      .on('broadcast', { event: 'lobby_update' }, (payload) => {
-        if (gameModeRef.current === 'single') return; // Ignore in single player
+      .on('presence', { event: 'sync' }, () => {
+        const state = channel.presenceState();
+        // Sync Presence State to otherPlayersRef
+        // State format: { "id": [ { id, name, ready, ... } ], ... }
 
-        const { id, name, ready, status } = payload.payload;
-        if (status === 'start_game') {
-          otherPlayersRef.current.forEach(p => p.cells = []);
-          switchGameState('playing');
-          setTimeLeft(GAME_DURATION_SEC);
-          timeLeftRef.current = GAME_DURATION_SEC;
+        // Mark all current as "stale" or just clear and rebuild?
+        // Rebuild is safer for identical sync.
+        const newPlayers = new Map();
 
-          startNewGame(); // Was spawnPlayer
-        } else {
-          otherPlayersRef.current.set(id, {
-            id, name: name || 'Unknown', ready, lastUpdate: Date.now(),
-            cells: []
-          });
+        for (const key in state) {
+          if (key === myId) continue; // Skip self
+          const userData = state[key][0]; // Take most recent presence data
+          if (userData) {
+            newPlayers.set(key, { ...userData, lastUpdate: Date.now() });
+          }
         }
+
+        otherPlayersRef.current = newPlayers;
+        // Trigger re-render for UI
+        setDebugInfo(prev => ({ ...prev, players: newPlayers.size + 1 }));
       })
       .on('broadcast', { event: 'player_death' }, (payload) => {
         if (gameModeRef.current === 'single') return; // Ignore in single player
@@ -1529,15 +1550,12 @@ export default function GamePage() {
             jackpotTimer = 0;
           }
         } else if (currentGS === 'lobby') {
-          // Lobby Updates
-          if (time - lastLobbyBroadcastTime > 1000) {
-            const myName = `Player ${myId.substr(0, 4)}`;
-            channel.send({
-              type: 'broadcast', event: 'lobby_update',
-              payload: { id: myId, name: nicknameRef.current || myName, ready: isReadyRef.current }
-            });
-            lastLobbyBroadcastTime = time;
-          }
+          // Lobby Updates - Presence handles list now.
+          // Host still manages "Start Game" via broadcast checkLobbyStart.
+          /* 
+          // REMOVED manual broadcast loop in favor of Presence
+          if (time - lastLobbyBroadcastTime > 1000) { ... } 
+          */
           checkLobbyStart(channel, deltaTime);
 
           // Force UI update for lobby count
