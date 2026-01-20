@@ -1644,8 +1644,13 @@ export default function GamePage() {
         }
 
 
-        // Broadcast ONLY in Multi Playing
-        if (mode === 'multi' && currentGS === 'playing' && time - lastGameBroadcastTime > 50) {
+        // FORCE BROADCAST in Multi (Relaxed State Check)
+        // We broadcast if we are playing OR if we are in Lobby but have cells (Post-Game/Pre-Game transition)
+        // Actually, just broadcast if we have cells and are in Multi mode.
+        if (mode === 'multi' && myPlayerCellsRef.current.length > 0 && time - lastGameBroadcastTime > 50) {
+          // Debug outgoing
+          // if (frameCount % 60 === 0) console.log("📤 Sending Game Update", { cells: myPlayerCellsRef.current.length });
+
           channel.send({
             type: 'broadcast', event: 'player_update',
             payload: {
@@ -1890,8 +1895,8 @@ export default function GamePage() {
 
       {gameState === 'menu' && (
         <div style={overlayStyle}>
-          <h1 style={{ fontSize: '4rem', color: '#00ff00', textShadow: '0 0 20px #00ff00' }}>GLOW BATTLE v1.5.5</h1>
-          <div style={{ color: '#aaa', marginBottom: '20px' }}>Current Version: GAME SYNC FIX (Relaxed)</div>
+          <h1 style={{ fontSize: '4rem', color: '#00ff00', textShadow: '0 0 20px #00ff00' }}>GLOW BATTLE v1.5.6</h1>
+          <div style={{ color: '#aaa', marginBottom: '20px' }}>Current Version: FORCE GAME SYNC (No State Check)</div>
           <input type="text" placeholder="Enter Nickname" value={nickname} onChange={e => setNicknameWrapper(e.target.value)}
             style={{ padding: '15px', fontSize: '1.5rem', borderRadius: '5px', border: 'none', textAlign: 'center', marginBottom: '20px' }} maxLength={10} />
 
