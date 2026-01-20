@@ -519,14 +519,18 @@ export default function GamePage() {
             }
 
             // 2. Broadcast Data
-            channel.send({
+            // 2. Broadcast Data (Send multiple times for reliability)
+            const startPayload = {
               type: 'broadcast', event: 'match_start',
               payload: {
                 food: initialFood,
                 viruses: initialViruses,
                 bots: initialBots
               }
-            });
+            };
+            channel.send(startPayload);
+            setTimeout(() => channel.send(startPayload), 500); // Redundancy 1
+            setTimeout(() => channel.send(startPayload), 1000); // Redundancy 2
 
             // 3. Start Local
             startHostGame(initialFood, initialViruses, initialBots);
@@ -1903,8 +1907,8 @@ export default function GamePage() {
 
       {gameState === 'menu' && (
         <div style={overlayStyle}>
-          <h1 style={{ fontSize: '4rem', color: '#00ff00', textShadow: '0 0 20px #00ff00' }}>GLOW BATTLE v1.5.7</h1>
-          <div style={{ color: '#aaa', marginBottom: '20px' }}>Current Version: HOST SYNC FIX (Timer Logic)</div>
+          <h1 style={{ fontSize: '4rem', color: '#00ff00', textShadow: '0 0 20px #00ff00' }}>GLOW BATTLE v1.5.8</h1>
+          <div style={{ color: '#aaa', marginBottom: '20px' }}>Current Version: START RELIABILITY (Triple Handshake)</div>
           <input type="text" placeholder="Enter Nickname" value={nickname} onChange={e => setNicknameWrapper(e.target.value)}
             style={{ padding: '15px', fontSize: '1.5rem', borderRadius: '5px', border: 'none', textAlign: 'center', marginBottom: '20px' }} maxLength={10} />
 
