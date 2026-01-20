@@ -499,44 +499,36 @@ export default function GamePage() {
 
           if (lobbyTimerRef.current <= 0) {
             // START GAME!
-            // 1. Generate World Data
-            const initialFood = [];
-            for (let i = 0; i < FOOD_COUNT; i++) initialFood.push(createFood());
+            // START GAME!
+            // 1. Generate Seed
+            const matchSeed = Math.floor(Math.random() * 2000000000);
 
-            const initialViruses = [];
-            for (let i = 0; i < VIRUS_COUNT; i++) initialViruses.push(createVirus());
-
-            const initialBots = [];
-            for (let i = 0; i < 20; i++) { // Always 20 bots in multi
-              initialBots.push({
-                id: 'bot_' + Math.random().toString(36).substr(2, 9),
-                x: Math.random() * WORLD_WIDTH,
-                y: Math.random() * WORLD_HEIGHT,
-                radius: 15 + Math.random() * 20,
-                color: '#888888',
-                targetX: Math.random() * WORLD_WIDTH,
-                targetY: Math.random() * WORLD_HEIGHT,
-                name: 'Bot',
-                changeDirTimer: 0
-              });
-            }
-
-            // 2. Broadcast Data
-            // 2. Broadcast Data (Send multiple times for reliability)
+            // 2. Broadcast Seed (Lite Payload for Reliability)
             const startPayload = {
               type: 'broadcast', event: 'match_start',
-              payload: {
-                food: initialFood,
-                viruses: initialViruses,
-                bots: initialBots
-              }
+              payload: { seed: matchSeed }
             };
             channel.send(startPayload);
-            setTimeout(() => channel.send(startPayload), 500); // Redundancy 1
-            setTimeout(() => channel.send(startPayload), 1000); // Redundancy 2
+            setTimeout(() => channel.send(startPayload), 300);
+            setTimeout(() => channel.send(startPayload), 600);
+            setTimeout(() => channel.send(startPayload), 1000);
 
-            // 3. Start Local
+            // 3. Start Local (Deterministic)
+            const rng = SeededRNG(matchSeed);
+
+            const initialFood = [];
+            for (let i = 0; i < FOOD_COUNT; i++) initialFood.push(createFood(false, rng));
+
+            const initialViruses = [];
+            for (let i = 0; i < VIRUS_COUNT; i++) initialViruses.push(createVirus(rng));
+
+            const initialBots = [];
+            for (let i = 0; i < 20; i++) initialBots.push(createBot(rng));
+
             startHostGame(initialFood, initialViruses, initialBots);
+            isGameStartingRef.current = false;
+
+
             isGameStartingRef.current = false;
           }
         }
@@ -563,58 +555,68 @@ export default function GamePage() {
     botsRef.current = bots;
   };
 
-  const createFood = (isJackpot = false) => ({
-    id: Math.random().toString(36).substr(2, 9),
-    x: Math.random() * WORLD_WIDTH,
-    y: Math.random() * WORLD_HEIGHT,
-    color: isJackpot ? '#ffd700' : `hsl(${Math.random() * 360}, 100%, 70%)`,
-    radius: isJackpot ? 25 : 5 + Math.random() * 5, // Jackpot bigger
+  // --- Seeded RNG for Sync ---
+  const SeededRNG = (seed) => {
+    let s = seed % 2147483647;
+    if (s <= 0) s += 2147483646;
+    return () => {
+      s = s * 16807 % 2147483647;
+      return (s - 1) / 2147483646;
+    };
+  };
+
+  // Modified Creators to use RNG
+  const createFood = (isJackpot = false, rng = Math.random) => ({
+    id: Math.floor(rng() * 1000000000).toString(36), // Deterministic ID
+    x: rng() * WORLD_WIDTH,
+    y: rng() * WORLD_HEIGHT,
+    color: isJackpot ? '#ffd700' : `hsl(${rng() * 360}, 100%, 70%)`,
+    radius: isJackpot ? 25 : 5 + rng() * 5,
     isJackpot: isJackpot,
     glow: isJackpot
   });
 
-  const createVirus = () => ({
-    x: Math.random() * WORLD_WIDTH,
-    y: Math.random() * WORLD_HEIGHT,
+  const createVirus = (rng = Math.random) => ({
+    x: rng() * WORLD_WIDTH,
+    y: rng() * WORLD_HEIGHT,
     radius: VIRUS_RADIUS,
     massBuf: 0
   });
 
+  const createBot = (rng = Math.random) => ({
+    id: 'bot_' + Math.floor(rng() * 1000000),
+    x: rng() * WORLD_WIDTH,
+    y: rng() * WORLD_HEIGHT,
+    radius: 15 + rng() * 20,
+    color: '#888888',
+    targetX: rng() * WORLD_WIDTH,
+    targetY: rng() * WORLD_HEIGHT,
+    name: 'Bot',
+    changeDirTimer: 0
+  });
+
   const spawnBot = () => {
-    botsRef.current.push({
-      id: 'bot_' + Math.random(),
-      x: Math.random() * WORLD_WIDTH,
-      y: Math.random() * WORLD_HEIGHT,
-      radius: 15 + Math.random() * 20,
-      color: '#888888',
-      targetX: Math.random() * WORLD_WIDTH,
-      targetY: Math.random() * WORLD_HEIGHT,
-      name: 'Bot',
-      changeDirTimer: 0
-    });
+    botsRef.current.push(createBot(Math.random));
   };
 
   const spawnJackpot = () => {
-    // Spawn only in Safe Zone
-    const f = createFood(true);
+    const f = createFood(true, Math.random);
     const sz = safeZoneRef.current;
 
-    // Rule 6: Jackpot Score +20 to +40 random
-    // Radius ~ Score. 
-    const jpScore = 20 + Math.random() * 20;
-    f.radius = jpScore; // Visual size = Score? Or area? Usually radius corresponds to score.
-    // Let's set radius = jpScore for simplicity so it ADDS that much roughly.
-    // Actually, createFood sets a default radius. We override.
+    // ... jackpot logic (uses Math.random usually, host authoritative)
+    // For Jackpot spawn logic, we need to be careful if we use RNG.
+    // Host runs this and broadcasts "food_spawned" with the RESULT.
+    // So Host uses Math.random, Client receives full object. That is fine.
 
-    // Random angle and distance within safe zone
+    const jpScore = 20 + Math.random() * 20;
+    f.radius = jpScore;
+
     const angle = Math.random() * Math.PI * 2;
-    // Rule 5: Only within CURRENT poison circle
-    // Ensure it spawns strictly inside
-    const dist = Math.random() * (sz.radius * 0.9); // 90% of Safe Zone to be safe
+    const dist = Math.random() * (sz.radius * 0.9);
     f.x = sz.x + Math.cos(angle) * dist;
     f.y = sz.y + Math.sin(angle) * dist;
 
-    // Clamp to world just in case SafeZone is bigger than world (start of game)
+    // Clamp
     f.x = Math.max(50, Math.min(WORLD_WIDTH - 50, f.x));
     f.y = Math.max(50, Math.min(WORLD_HEIGHT - 50, f.y));
 
@@ -1506,11 +1508,27 @@ export default function GamePage() {
       .on('broadcast', { event: 'match_start' }, (payload) => {
         if (gameModeRef.current === 'single') return;
 
-        // Client receives World Data
-        const { food, viruses, bots } = payload.payload;
-        foodRef.current = food || [];
-        virusesRef.current = viruses || [];
-        botsRef.current = bots || [];
+        const { seed, food, viruses, bots } = payload.payload;
+
+        if (seed !== undefined) {
+          // V1.5.10+ Seeded Generation
+          console.log("🌱 Received Match Seed:", seed);
+          const rng = SeededRNG(seed);
+          foodRef.current = [];
+          for (let i = 0; i < FOOD_COUNT; i++) foodRef.current.push(createFood(false, rng));
+
+          virusesRef.current = [];
+          for (let i = 0; i < VIRUS_COUNT; i++) virusesRef.current.push(createVirus(rng));
+
+          botsRef.current = [];
+          for (let i = 0; i < 20; i++) botsRef.current.push(createBot(rng));
+
+        } else {
+          // Backward/Fallback (Full Payload)
+          foodRef.current = food || [];
+          virusesRef.current = viruses || [];
+          botsRef.current = bots || [];
+        }
 
         switchGameState('playing');
         startNewGame(false); // Do not spawn bots locally
@@ -1912,8 +1930,8 @@ export default function GamePage() {
 
       {gameState === 'menu' && (
         <div style={overlayStyle}>
-          <h1 style={{ fontSize: '4rem', color: '#00ff00', textShadow: '0 0 20px #00ff00' }}>GLOW BATTLE v1.5.9</h1>
-          <div style={{ color: '#aaa', marginBottom: '20px' }}>Current Version: COUNTDOWN RELIABILITY FIX</div>
+          <h1 style={{ fontSize: '4rem', color: '#00ff00', textShadow: '0 0 20px #00ff00' }}>GLOW BATTLE v1.5.10</h1>
+          <div style={{ color: '#aaa', marginBottom: '20px' }}>Current Version: SEEDED SYNC (Lite Payload)</div>
           <input type="text" placeholder="Enter Nickname" value={nickname} onChange={e => setNicknameWrapper(e.target.value)}
             style={{ padding: '15px', fontSize: '1.5rem', borderRadius: '5px', border: 'none', textAlign: 'center', marginBottom: '20px' }} maxLength={10} />
 
