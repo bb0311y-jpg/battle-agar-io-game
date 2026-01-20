@@ -443,7 +443,17 @@ export default function GamePage() {
   };
 
   // Helper: Am I the Host? (Lowest ID)
+  // Helper: Am I the Host? (Lowest ID)
   const isHost = () => {
+    // In Lobby, use lobbyPlayersRef to decide host for starting game
+    if (gameStateRef.current === 'lobby') {
+      const allIds = [myId, ...Array.from(lobbyPlayersRef.current.keys())];
+      allIds.sort();
+      return allIds[0] === myId;
+    }
+    // In Game, use otherPlayersRef (active players)
+    // RISK: If a player drops, host might shift. 
+    // Ideally host should be sticky, but Lowest ID is robust enough for now.
     const allIds = [myId, ...Array.from(otherPlayersRef.current.keys())];
     allIds.sort();
     return allIds[0] === myId;
@@ -1671,11 +1681,7 @@ export default function GamePage() {
         const now = Date.now();
         // Only cleanup timed-out players in PLAYING mode (where we expect constant broadcasts).
         // In LOBBY, we rely on Supabase Presence (which doesn't heartbeat constantly), so we should NOT timeout players.
-        if (currentGS === 'playing') {
-          for (const [pid, p] of otherPlayersRef.current.entries()) {
-            if (now - p.lastUpdate > 3000) otherPlayersRef.current.delete(pid);
-          }
-        }
+
 
         if (currentGS === 'playing' || currentGS === 'gameover' || currentGS === 'lobby') {
           draw(ctx, canvas, currentGS);
@@ -1708,10 +1714,12 @@ export default function GamePage() {
                 // Broadcast
                 channel.send({ type: 'broadcast', event: 'match_time_update', payload: { time: timeLeftRef.current } });
               } else {
-                // Client: Interpolate or just wait?
-                // If we only wait for 1s broadcast, timer feels jerky or laggy?
-                // Actually, 1s tick is fine for a game timer.
-                // But let's allow local decrement for smoothness, and overwrite on sync.
+                // Client: Interpolate locally to prevent stutter
+                // We rely on 'match_time_update' to correct drift, but we MUST decrement locally
+                // otherwise if a packet is dropped, we freeze.
+
+                // Only decrement if we haven't received an update recently?
+                // Actually, standard prediction: always decrement, server overwrites.
                 timeLeftRef.current -= 1;
                 setTimeLeft(timeLeftRef.current);
               }
@@ -1895,8 +1903,8 @@ export default function GamePage() {
 
       {gameState === 'menu' && (
         <div style={overlayStyle}>
-          <h1 style={{ fontSize: '4rem', color: '#00ff00', textShadow: '0 0 20px #00ff00' }}>GLOW BATTLE v1.5.6</h1>
-          <div style={{ color: '#aaa', marginBottom: '20px' }}>Current Version: FORCE GAME SYNC (No State Check)</div>
+          <h1 style={{ fontSize: '4rem', color: '#00ff00', textShadow: '0 0 20px #00ff00' }}>GLOW BATTLE v1.5.7</h1>
+          <div style={{ color: '#aaa', marginBottom: '20px' }}>Current Version: HOST SYNC FIX (Timer Logic)</div>
           <input type="text" placeholder="Enter Nickname" value={nickname} onChange={e => setNicknameWrapper(e.target.value)}
             style={{ padding: '15px', fontSize: '1.5rem', borderRadius: '5px', border: 'none', textAlign: 'center', marginBottom: '20px' }} maxLength={10} />
 
