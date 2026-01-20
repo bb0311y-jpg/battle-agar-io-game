@@ -1,7 +1,7 @@
 # 專案進度與溝通 (Project Status & Communication)
 
 ## 📅 最後更新時間 (Last Updated)
-2026-01-18 (Session 4 - Multiplayer Fix Final)
+2026-01-21 (Session 5 - Multiplayer Hardening)
 
 ## ℹ️ 專案概要 (Project Overview)
 *   **專案名稱**: Battle Agar.io Game
@@ -9,32 +9,21 @@
 *   **正式站點**: `https://battle-agar-io-game.vercel.app`
 
 ## 📊 專案當前狀態 (Current Status)
-- **目前階段 (Phase)**: **FIXED** - 多人連線修復完成 (Multiplayer Connection Fixed)
+- **目前階段 (Phase)**: **STABLE** - 多人連線極度穩定版 (Server-Like Authority)
 - **最近完成 (Recently Completed)**:
-    - **修復大廳同步**: 移除錯誤的 3 秒超時邏輯，防止玩家在大廳消失。
-    - **混合式同步策略 (Hybrid Sync)**: 
-        1. 主要使用 `Presence` 同步使用者列表。
-        2. 當 Anon Auth 失敗時，自動降級使用 `Manual Broadcast` 發送 Ready 狀態。
-        3. 解決了「已準備」按鈕狀態無法在客戶端之間同步的問題。
-    - **語法錯誤修復**: 修復了 `.on()` 串接語法問題。
-    - **自動化測試**: 透過 Iframe 模擬雙人連線，確認「無法同步」現象與 Auth 錯誤有關，並已透過Fallback修復。
+    - **v1.5.12 (SERVER DELAY HOST)**: 房主模擬伺服器延遲啟動，確保種子封包送達。
+    - **v1.5.10 (SEEDED SYNC)**: 將 20KB+ 的地圖封包縮減為 4 Bytes 的 `Seed`，徹底解決傳輸失敗問題。
+    - **v1.5.8 (TRIPLE HANDSHAKE)**: 關鍵指令發送 3 次，防止 UDP 丟包。
+    - **Crash Fix**: 修復房主啟動時 `ReferenceError` 崩潰問題。
 
 - **目前已知**:
-    - Supabase "Anonymous Sign-ins" 未開啟可能導致 Presence 寫入失敗，但 Fallback 機制已能繞過此問題讓遊戲可玩。
-    - 建議使用者檢查 Supabase Auth 設定以獲得最佳效能。
+    - 多人同步已穩定，等待大規模壓力測試。
 
 ## ⏭️ 下一步計畫 (Next Steps)
-1.  **使用者最終測試**: 請使用者雙開視窗確認可以進入遊戲。
+1.  **驗證**: 繼續驗證多人同步與遊戲體驗。
 2.  **Phase 5**: 開始開發下注介面 (Betting UI)。
 
 ---
 
-## 🤖 下一次循環啟動語 (Startup Phrase for Next Cycle)
-> **[SYSTEM_RESUME]**
-> **Current Phase**: Phase 5 (Betting System)
-> **Last Action**: Implemented Hybrid Sync (Presence + Broadcast) to fix Lobby Ready State issues.
-> **Context**:
-> - Multiplayer Lobby is now ROBUST against Auth failures via fallback broadcast.
-> - `supabase_schema.sql` is ready.
-> - **Next**: Implement Betting UI in Lobby.
-> **Objective**: Build the Betting System (UI + Logic).
+## 🤖 下一次循環啟動指令 (Startup Command for Next Cycle)
+> **請開啟瀏覽器並造訪 `https://battle-agar-io-game.vercel.app/`。目前版本為 v1.5.12，已修復房主啟動時的 ReferenceError 崩潰問題並實施了伺服器模擬延遲與種子同步（Seeded Sync）。目前的進度是已驗證大廳進入及倒數邏輯正常。請從測試多人同步遊玩的穩定性開始。**

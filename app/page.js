@@ -126,6 +126,7 @@ export default function GamePage() {
   // New Ref for Heartbeat Lobby
   const lobbyPlayersRef = useRef(new Map());
   const lastHeartbeatRef = useRef(0);
+  const matchSeedRef = useRef(null); // Seed for sync
 
   // Helper to switch state cleanly
   const switchGameState = (newState) => {
@@ -539,8 +540,9 @@ export default function GamePage() {
 
           if (lobbyTimerRef.current <= 0) {
             // START GAME!
-            // 1. Generate Seed
+            // 1. Generate Seed (Store in Ref for Heartbeat access)
             const matchSeed = Math.floor(Math.random() * 2000000000);
+            matchSeedRef.current = matchSeed;
 
             // 2. Broadcast & Delay (Server-Like Authority)
             const startPayload = {
@@ -1489,11 +1491,51 @@ export default function GamePage() {
 
         if (id === myId) return; // Ignore self
 
-        // RELAXED CHECKS: Always update list if we have a valid ID from network
-        // if (gameModeRef.current !== 'multi') return;
-        // if (gameStateRef.current !== 'lobby') return;     
-
         console.log("💓 ACCEPTED Heartbeat from:", name, id);
+
+        // V1.5.13 ROBUST SYNC: Check if Host is signalling start via Heartbeat
+        // This bypasses packet loss on the specific 'match_start' event
+        const { isStarting, seed, timer: hostTimer } = payload.payload;
+
+        if (isStarting && seed && gameStateRef.current === 'lobby') {
+          console.log("🔥 DETECTED HOST STARTING via HEARTBEAT!", seed);
+          if (!isGameStartingRef.current) {
+            isGameStartingRef.current = true;
+            lobbyTimerRef.current = hostTimer || 3;
+          }
+          // Fail-safe: If timer is near zero, Just Start?
+          // Actually, let's trigger the same start logic.
+          // We store seed to use later? 
+          // Better: Trigger the specific 'match_start' handler logic directly if needed?
+          // No, let's just ensure we are in 'Countdown' mode.
+
+          // If Host says "Starting" and we have Seed, we should assume we are transitioning.
+          // Use the seed to pre-warm?
+          // Actually, the main missing piece was 'match_start' packet.
+          // If we see 'isStarting' is true, and then later 'lobby_heartbeat' stops (Host in game), 
+          // we might be stuck?
+          // Host continues 'lobby_heartbeat' for 2s in Lobby.
+
+          // Let's force a "Local Match Start" if we have the Seed and timer is low?
+          // Or just fire a fake 'match_start' event to ourselves?
+          if (hostTimer < 0.5) {
+            // Assume we missed the start packet
+            const fakePayload = { payload: { seed } };
+            // Call match_start logic? Code duplication.
+            // Instead, just call the logic via a helper or dispatch?
+            // Let's just manually trigger:
+            console.log("🔥 FORCE STARTING FROM HEARTBEAT SEED");
+            const rng = SeededRNG(seed);
+            foodRef.current = [];
+            for (let i = 0; i < FOOD_COUNT; i++) foodRef.current.push(createFood(false, rng));
+            virusesRef.current = [];
+            for (let i = 0; i < VIRUS_COUNT; i++) virusesRef.current.push(createVirus(rng));
+            botsRef.current = [];
+            for (let i = 0; i < 20; i++) botsRef.current.push(createBot(rng));
+            switchGameState('playing');
+            startNewGame(false);
+          }
+        }
 
         lobbyPlayersRef.current.set(id, {
           id,
@@ -1685,7 +1727,11 @@ export default function GamePage() {
                 id: myId,
                 name: nicknameRef.current || `Player ${myId.substr(0, 4)}`,
                 ready: isReadyRef.current,
-                timestamp: Date.now()
+                timestamp: Date.now(),
+                // NEW: State Sync Fields
+                isStarting: isGameStartingRef.current, // Host flag
+                timer: lobbyTimerRef.current,
+                seed: matchSeedRef.current
               }
             })
               .then(resp => {
@@ -1962,8 +2008,8 @@ export default function GamePage() {
 
       {gameState === 'menu' && (
         <div style={overlayStyle}>
-          <h1 style={{ fontSize: '4rem', color: '#00ff00', textShadow: '0 0 20px #00ff00' }}>GLOW BATTLE v1.5.12</h1>
-          <div style={{ color: '#aaa', marginBottom: '20px' }}>Current Version: SERVER DELAY HOST (Reliable Start)</div>
+          <h1 style={{ fontSize: '4rem', color: '#00ff00', textShadow: '0 0 20px #00ff00' }}>GLOW BATTLE v1.5.13</h1>
+          <div style={{ color: '#aaa', marginBottom: '20px' }}>Current Version: HEARTBEAT SYNC (State Carrier)</div>
           <input type="text" placeholder="Enter Nickname" value={nickname} onChange={e => setNicknameWrapper(e.target.value)}
             style={{ padding: '15px', fontSize: '1.5rem', borderRadius: '5px', border: 'none', textAlign: 'center', marginBottom: '20px' }} maxLength={10} />
 

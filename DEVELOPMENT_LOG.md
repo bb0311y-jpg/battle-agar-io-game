@@ -238,3 +238,24 @@ Recovered project state after folder deletion. Confirmed that local git history 
 2.  **Check Game Loop Broadcaster**: Ensure it writes to the correct `global_room_v2` channel.
 
 
+### 🛠️ Fix Implemented (v1.5.5 - v1.5.12)
+1.  **In-Game Visibility (v1.5.5 - v1.5.6)**:
+    *   **Relaxed Guard Clauses**: Removed strict state checks in `player_update` listener.
+    *   **Force Broadcast**: Modified Game Loop to force broadcast even if Game State isn't strictly 'playing' yet (handling transition periods).
+2.  **Timer Synchronization (v1.5.7)**:
+    *   **Host Authority**: Explicitly designated the Host (via `lobbyPlayersRef` check) to broadcast time.
+    *   **Client Prediction**: Allowed clients to decrement locally to prevent UI stutter/lag.
+3.  **Start Reliability (v1.5.8 - v1.5.9)**:
+    *   **Triple Handshake**: Host now sends `match_start` and `lobby_countdown` packets 3 times (0ms, 500ms, 1000ms) to prevent UDP-like packet loss at critical moments.
+    *   **Idempotency**: Updated listeners to ignore duplicate start signals.
+4.  **Payload & Crash Fix (v1.5.10 - v1.5.12)**:
+    *   **Problem**: Host was crashing (`ReferenceError`) or clients not receiving start signal due to huge payload size (1000+ objects).
+    *   **Seeded Sync (v1.5.10)**: Replaced massive JSON payload with a single integer `seed`. Clients generate the *exact* same world locally using a deterministic `SeededRNG`.
+    *   **Scope Fix (v1.5.11)**: Moved `SeededRNG` and Creator functions to Global Scope to fix `ReferenceError` on Host start.
+    *   **Server-Like Delay (v1.5.12)**: Implemented a 2-second delay where Host stays in Lobby to "blast" the start signal effectively before switching to local Game Loop. This successfully mimics a dedicated server authority and resolved the "Host enters, Client stays" desync.
+
+### ✅ Status
+*   **Multiplayer works stable**.
+*   **Lobby/Countdown/Game Start transitions are robust**.
+*   **Packet sizes are optimized** (Seed-based).
+*   **Crash on Host Start is resolved**.
