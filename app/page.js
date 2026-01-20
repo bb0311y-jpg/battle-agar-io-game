@@ -1395,10 +1395,13 @@ export default function GamePage() {
     window.addEventListener('keydown', handleKeyDown);
 
     // Network Setup
-    const channel = supabase.channel('room_v1_5', {
+    // JOIN CHANNEL - DEBUG MODE V2
+    const channel = supabase.channel('global_room_v2', {
       config: {
-        broadcast: { self: false, ack: false },
-        presence: {}
+        broadcast: { self: true, ack: false }, // Enable loopback for debugging!
+        presence: {
+          key: myId,
+        },
       },
     });
 
@@ -1426,13 +1429,15 @@ export default function GamePage() {
         }
       })
       .on('broadcast', { event: 'lobby_heartbeat' }, (payload) => {
-        // console.log("💓 Receive Heartbeat", payload); // Spammy but useful
+        const { id, name, ready, timestamp } = payload.payload;
+
+        // DEBUG: Verify loopback works
+        console.log(`💓 RAW RX from ${name} (${id.substr(0, 4)})`);
+
         if (gameModeRef.current !== 'multi') return;
-        // Allows updating lobby state even if 'playing' ? No, strictly lobby.
         if (gameStateRef.current !== 'lobby') return;
 
-        const { id, name, ready, timestamp } = payload.payload;
-        if (id === myId) return;
+        if (id === myId) return; // Don't add self to "other players" list
 
         console.log("💓 Valid Heartbeat from:", name, id);
 
@@ -1446,6 +1451,10 @@ export default function GamePage() {
         // Update UI State
         setLobbyPlayers(Array.from(lobbyPlayersRef.current.values()));
         setDebugInfo(prev => ({ ...prev, players: lobbyPlayersRef.current.size + 1 }));
+      })
+      .on('broadcast', { event: '*' }, (payload) => {
+        // CATCH-ALL debug
+        // console.log("🌍 Broadcast Event:", payload.event);
       })
       .on('broadcast', { event: 'player_death' }, (payload) => {
         if (gameModeRef.current === 'single') return; // Ignore in single player
@@ -1878,8 +1887,8 @@ export default function GamePage() {
 
       {gameState === 'menu' && (
         <div style={overlayStyle}>
-          <h1 style={{ fontSize: '4rem', color: '#00ff00', textShadow: '0 0 20px #00ff00' }}>GLOW BATTLE v1.5.2</h1>
-          <div style={{ color: '#aaa', marginBottom: '20px' }}>Current Version: HEARTBEAT SYNC FIX</div>
+          <h1 style={{ fontSize: '4rem', color: '#00ff00', textShadow: '0 0 20px #00ff00' }}>GLOW BATTLE v1.5.3</h1>
+          <div style={{ color: '#aaa', marginBottom: '20px' }}>Current Version: DIAGNOSTIC MODE (Global Channel)</div>
           <input type="text" placeholder="Enter Nickname" value={nickname} onChange={e => setNicknameWrapper(e.target.value)}
             style={{ padding: '15px', fontSize: '1.5rem', borderRadius: '5px', border: 'none', textAlign: 'center', marginBottom: '20px' }} maxLength={10} />
 

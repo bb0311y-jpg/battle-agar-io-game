@@ -192,3 +192,28 @@ Recovered project state after folder deletion. Confirmed that local git history 
 *   **Vercel Build Queue**: If a User says "It's still broken" and I pushed the fix, 99% of the time it is because the DEPLOYMENT FAILED or IS QUEUED.
 *   **Visual Check**: I cannot trust "It works locally". I must see the Version Badge change on the live URL.
 *   **Action**: I will not test multiplayer again until I see `v1.5.2` on the screen.
+
+## Date: 2026-01-21 (Session 5) [Multiplayer Heartbeat Debugging]
+
+### 📝 Change Log
+| Type | Description | Status |
+| :--- | :--- | :--- |
+| **Fix** | **Enabled Anonymous Auth** in Supabase settings. This unblocked the `AuthApiError` for heartbeats. | Done |
+| **Fix** | Bumped version to **v1.5.2**. Verified deployment on production. | Done |
+| **Test** | **FAILED**: Clients send heartbeats (`SENT OK`) but do NOT receive them from others. Lobby remains at "1 connected". | **Failed** |
+
+### 🔍 Root Cause Analysis (Ongoing)
+1.  **Symptoms**:
+    *   Sender: `channel.send()` returns `ok`.
+    *   Receiver: `channel.on('broadcast', ...)` never fires for remote messages.
+    *   Network: WebSocket is `SUBSCRIBED`.
+2.  **Hypothesis**:
+    *   **Self-Reflection**: Supabase Broadcast by default *does not* send the message back to the sender. This is fine.
+    *   **Isolation**: Clients might be on different channel instances or topics? (Checked: both on `room_v1_5`).
+    *   **RLS/Policy**: Even if "Anon Sign-in" is on, maybe "Realtime" messages require specific RLS policies for `broadcast`? (Usually broadcast is public by default unless restricted).
+    *   **Filter Logic**: Is my code `if (id === myId) return;` filtering out legitimate messages because of ID collisions? (Tested with cleared storage/Incognito, still failed).
+
+### 🚀 Next Steps
+1.  **Force "Public" Channel**: Try removing any RLS restrictions or verify Supabase Client is initialized with options that allow broadcast.
+2.  **Debug Receiver**: Add a "Catch-All" listener `channel.on('*', ...)` to see IF any traffic is hitting the client.
+
