@@ -1426,12 +1426,15 @@ export default function GamePage() {
         }
       })
       .on('broadcast', { event: 'lobby_heartbeat' }, (payload) => {
+        // console.log("💓 Receive Heartbeat", payload); // Spammy but useful
         if (gameModeRef.current !== 'multi') return;
         // Allows updating lobby state even if 'playing' ? No, strictly lobby.
         if (gameStateRef.current !== 'lobby') return;
 
         const { id, name, ready, timestamp } = payload.payload;
         if (id === myId) return;
+
+        console.log("💓 Valid Heartbeat from:", name, id);
 
         lobbyPlayersRef.current.set(id, {
           id,
@@ -1524,6 +1527,11 @@ export default function GamePage() {
         timeLeftRef.current = time;
         setTimeLeft(time);
       })
+    channel
+      .on('broadcast', { event: 'player_update' }, (payload) => {
+        // ... (handlers)
+      })
+      // ... (other handlers)
       .subscribe((status, err) => {
         console.log("Supabase Channel Status:", status, err);
         setConnectionStatus(status);
@@ -1533,6 +1541,7 @@ export default function GamePage() {
       });
 
     channelRef.current = channel;
+    window.gameChannel = channel; // EXPOSE FOR DEBUGGING
 
     // Game Loop
     let lastTime = performance.now();
@@ -1587,6 +1596,7 @@ export default function GamePage() {
 
           // HEARTBEAT LOGIC
           if (time - lastHeartbeatRef.current > 1000) {
+            console.log("💓 Sending Heartbeat...", { id: myId, ready: isReadyRef.current });
             channelRef.current?.send({
               type: 'broadcast',
               event: 'lobby_heartbeat',
@@ -1596,7 +1606,13 @@ export default function GamePage() {
                 ready: isReadyRef.current,
                 timestamp: Date.now()
               }
-            });
+            })
+              .then(resp => {
+                if (resp === 'ok') console.log("💓 Heartbeat SENT OK");
+                else console.warn("💓 Heartbeat Send Status:", resp);
+              })
+              .catch(err => console.error("💓 Heartbeat Send Error:", err));
+
             lastHeartbeatRef.current = time;
 
             // Clean up timeouts
@@ -1604,6 +1620,7 @@ export default function GamePage() {
             let changed = false;
             for (const [id, player] of lobbyPlayersRef.current.entries()) {
               if (now - player.lastSeen > 3500) { // 3.5s timeout
+                console.log("💀 Player Timed out:", id);
                 lobbyPlayersRef.current.delete(id);
                 changed = true;
               }
@@ -1861,8 +1878,8 @@ export default function GamePage() {
 
       {gameState === 'menu' && (
         <div style={overlayStyle}>
-          <h1 style={{ fontSize: '4rem', color: '#00ff00', textShadow: '0 0 20px #00ff00' }}>GLOW BATTLE v1.5.1</h1>
-          <div style={{ color: '#aaa', marginBottom: '20px' }}>Current Version: MP FIX + DEBUG</div>
+          <h1 style={{ fontSize: '4rem', color: '#00ff00', textShadow: '0 0 20px #00ff00' }}>GLOW BATTLE v1.5.2</h1>
+          <div style={{ color: '#aaa', marginBottom: '20px' }}>Current Version: HEARTBEAT SYNC FIX</div>
           <input type="text" placeholder="Enter Nickname" value={nickname} onChange={e => setNicknameWrapper(e.target.value)}
             style={{ padding: '15px', fontSize: '1.5rem', borderRadius: '5px', border: 'none', textAlign: 'center', marginBottom: '20px' }} maxLength={10} />
 
