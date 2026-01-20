@@ -18,7 +18,47 @@ const INITIAL_SAFE_ZONE_RADIUS = Math.max(WORLD_WIDTH, WORLD_HEIGHT) / 1.5; // S
 // End radius = WORLD_WIDTH * 0.25 / 2? No, map size to 25%. Area? or Width?
 // "Only 25% map size". If Area is 25%, width is 50%. If Width is 25%, Area is 6.25%.
 // Let's assume Width/Radius becomes 25% of original (More dramatic).
+// Let's assume Width/Radius becomes 25% of original (More dramatic).
 // Original Radius equivalent ~2250. Final Radius ~560.
+
+// --- Global Utilities (Module Scope) to avoid Hoisting Issues ---
+const SeededRNG = (seed) => {
+  let s = seed % 2147483647;
+  if (s <= 0) s += 2147483646;
+  return () => {
+    s = s * 16807 % 2147483647;
+    return (s - 1) / 2147483646;
+  };
+};
+
+const createFood = (isJackpot = false, rng = Math.random) => ({
+  id: Math.floor(rng() * 1000000000).toString(36), // Deterministic ID
+  x: rng() * WORLD_WIDTH,
+  y: rng() * WORLD_HEIGHT,
+  color: isJackpot ? '#ffd700' : `hsl(${rng() * 360}, 100%, 70%)`,
+  radius: isJackpot ? 25 : 5 + rng() * 5,
+  isJackpot: isJackpot,
+  glow: isJackpot
+});
+
+const createVirus = (rng = Math.random) => ({
+  x: rng() * WORLD_WIDTH,
+  y: rng() * WORLD_HEIGHT,
+  radius: VIRUS_RADIUS,
+  massBuf: 0
+});
+
+const createBot = (rng = Math.random) => ({
+  id: 'bot_' + Math.floor(rng() * 1000000),
+  x: rng() * WORLD_WIDTH,
+  y: rng() * WORLD_HEIGHT,
+  radius: 15 + rng() * 20,
+  color: '#888888',
+  targetX: rng() * WORLD_WIDTH,
+  targetY: rng() * WORLD_HEIGHT,
+  name: 'Bot',
+  changeDirTimer: 0
+});
 
 export default function GamePage() {
   const canvasRef = useRef(null);
@@ -555,45 +595,13 @@ export default function GamePage() {
     botsRef.current = bots;
   };
 
-  // --- Seeded RNG for Sync ---
-  const SeededRNG = (seed) => {
-    let s = seed % 2147483647;
-    if (s <= 0) s += 2147483646;
-    return () => {
-      s = s * 16807 % 2147483647;
-      return (s - 1) / 2147483646;
-    };
-  };
-
-  // Modified Creators to use RNG
-  const createFood = (isJackpot = false, rng = Math.random) => ({
-    id: Math.floor(rng() * 1000000000).toString(36), // Deterministic ID
-    x: rng() * WORLD_WIDTH,
-    y: rng() * WORLD_HEIGHT,
-    color: isJackpot ? '#ffd700' : `hsl(${rng() * 360}, 100%, 70%)`,
-    radius: isJackpot ? 25 : 5 + rng() * 5,
-    isJackpot: isJackpot,
-    glow: isJackpot
-  });
-
-  const createVirus = (rng = Math.random) => ({
-    x: rng() * WORLD_WIDTH,
-    y: rng() * WORLD_HEIGHT,
-    radius: VIRUS_RADIUS,
-    massBuf: 0
-  });
-
-  const createBot = (rng = Math.random) => ({
-    id: 'bot_' + Math.floor(rng() * 1000000),
-    x: rng() * WORLD_WIDTH,
-    y: rng() * WORLD_HEIGHT,
-    radius: 15 + rng() * 20,
-    color: '#888888',
-    targetX: rng() * WORLD_WIDTH,
-    targetY: rng() * WORLD_HEIGHT,
-    name: 'Bot',
-    changeDirTimer: 0
-  });
+  /* MOVED TO MODULE SCOPE */
+  /*
+  const SeededRNG = ...
+  const createFood = ...
+  const createVirus = ...
+  const createBot = ...
+  */
 
   const spawnBot = () => {
     botsRef.current.push(createBot(Math.random));
@@ -1930,8 +1938,8 @@ export default function GamePage() {
 
       {gameState === 'menu' && (
         <div style={overlayStyle}>
-          <h1 style={{ fontSize: '4rem', color: '#00ff00', textShadow: '0 0 20px #00ff00' }}>GLOW BATTLE v1.5.10</h1>
-          <div style={{ color: '#aaa', marginBottom: '20px' }}>Current Version: SEEDED SYNC (Lite Payload)</div>
+          <h1 style={{ fontSize: '4rem', color: '#00ff00', textShadow: '0 0 20px #00ff00' }}>GLOW BATTLE v1.5.11</h1>
+          <div style={{ color: '#aaa', marginBottom: '20px' }}>Current Version: CRASH FIX (Ref Error Resolved)</div>
           <input type="text" placeholder="Enter Nickname" value={nickname} onChange={e => setNicknameWrapper(e.target.value)}
             style={{ padding: '15px', fontSize: '1.5rem', borderRadius: '5px', border: 'none', textAlign: 'center', marginBottom: '20px' }} maxLength={10} />
 
