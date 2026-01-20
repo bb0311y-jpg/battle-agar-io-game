@@ -486,8 +486,11 @@ export default function GamePage() {
         if (!isGameStartingRef.current) {
           isGameStartingRef.current = true;
           lobbyTimerRef.current = 3;
-          // Notify everyone we are counting down
-          channel.send({ type: 'broadcast', event: 'lobby_countdown', payload: { seconds: 3 } });
+          // Notify everyone we are counting down (Tripple Send for reliability)
+          const countdownPayload = { type: 'broadcast', event: 'lobby_countdown', payload: { seconds: 3 } };
+          channel.send(countdownPayload);
+          setTimeout(() => channel.send(countdownPayload), 300);
+          setTimeout(() => channel.send(countdownPayload), 600);
         } else {
           lobbyTimerRef.current -= (deltaTime / 1000);
 
@@ -1514,6 +1517,8 @@ export default function GamePage() {
       })
       .on('broadcast', { event: 'lobby_countdown' }, (payload) => {
         if (gameModeRef.current === 'single') return;
+        if (isGameStartingRef.current) return; // Already started
+
         isGameStartingRef.current = true;
         lobbyTimerRef.current = payload.payload.seconds;
       })
@@ -1907,8 +1912,8 @@ export default function GamePage() {
 
       {gameState === 'menu' && (
         <div style={overlayStyle}>
-          <h1 style={{ fontSize: '4rem', color: '#00ff00', textShadow: '0 0 20px #00ff00' }}>GLOW BATTLE v1.5.8</h1>
-          <div style={{ color: '#aaa', marginBottom: '20px' }}>Current Version: START RELIABILITY (Triple Handshake)</div>
+          <h1 style={{ fontSize: '4rem', color: '#00ff00', textShadow: '0 0 20px #00ff00' }}>GLOW BATTLE v1.5.9</h1>
+          <div style={{ color: '#aaa', marginBottom: '20px' }}>Current Version: COUNTDOWN RELIABILITY FIX</div>
           <input type="text" placeholder="Enter Nickname" value={nickname} onChange={e => setNicknameWrapper(e.target.value)}
             style={{ padding: '15px', fontSize: '1.5rem', borderRadius: '5px', border: 'none', textAlign: 'center', marginBottom: '20px' }} maxLength={10} />
 
