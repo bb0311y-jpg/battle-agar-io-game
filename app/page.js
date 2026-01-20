@@ -1434,12 +1434,13 @@ export default function GamePage() {
         // DEBUG: Verify loopback works
         console.log(`💓 RAW RX from ${name} (${id.substr(0, 4)})`);
 
-        if (gameModeRef.current !== 'multi') return;
-        if (gameStateRef.current !== 'lobby') return;
+        if (id === myId) return; // Ignore self
 
-        if (id === myId) return; // Don't add self to "other players" list
+        // RELAXED CHECKS: Always update list if we have a valid ID from network
+        // if (gameModeRef.current !== 'multi') return;
+        // if (gameStateRef.current !== 'lobby') return;     
 
-        console.log("💓 Valid Heartbeat from:", name, id);
+        console.log("💓 ACCEPTED Heartbeat from:", name, id);
 
         lobbyPlayersRef.current.set(id, {
           id,
@@ -1887,8 +1888,8 @@ export default function GamePage() {
 
       {gameState === 'menu' && (
         <div style={overlayStyle}>
-          <h1 style={{ fontSize: '4rem', color: '#00ff00', textShadow: '0 0 20px #00ff00' }}>GLOW BATTLE v1.5.3</h1>
-          <div style={{ color: '#aaa', marginBottom: '20px' }}>Current Version: DIAGNOSTIC MODE (Global Channel)</div>
+          <h1 style={{ fontSize: '4rem', color: '#00ff00', textShadow: '0 0 20px #00ff00' }}>GLOW BATTLE v1.5.4</h1>
+          <div style={{ color: '#aaa', marginBottom: '20px' }}>Current Version: RELAXED SYNC FIX</div>
           <input type="text" placeholder="Enter Nickname" value={nickname} onChange={e => setNicknameWrapper(e.target.value)}
             style={{ padding: '15px', fontSize: '1.5rem', borderRadius: '5px', border: 'none', textAlign: 'center', marginBottom: '20px' }} maxLength={10} />
 
