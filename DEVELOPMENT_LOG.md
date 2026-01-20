@@ -166,3 +166,29 @@ Recovered project state after folder deletion. Confirmed that local git history 
 
 ### 🧠 Note to Self (Review & Lessons)
 *   **Race Conditions**: When using two data sources (Presence + Broadcast) for the same entity, you MUST have a conflict resolution strategy (e.g., Timestamp-based Last Write Wins). Simply overwriting one with the other will cause flickering and state reversion.
+
+## Date: 2026-01-18 (Session 4 - Part 9) [Force Sync & Rebuild]
+
+### 📝 Change Log
+| Type | Description | Status |
+| :--- | :--- | :--- |
+| **Check** | Verified Git Log & Status. Commits were local but maybe not fully synced on Vercel side due to build caching? | Done |
+| **Fix** | Bumped version to **v1.5.2** (Visible Change) to force user to see if they are on the new code. | Done |
+| **Fix** | Executed `git push` again with a forced rebuild trigger. | Done |
+
+### 🧠 Note to Self
+*   **Version Visibility**: When debugging "Is this fixed?", ALWAYS change a visible version number. It's the only way to know if the client is running the new code or a cached old bundle.
+*   **Vercel Caching**: Sometimes Vercel caches build steps. Changing `package.json` or a visible string usually busts the cache.
+
+## Date: 2026-01-18 (Session 4 - Part 10) [Deployment Stuck - Force]
+
+### 📝 Change Log
+| Type | Description | Status |
+| :--- | :--- | :--- |
+| **Check** | Verified Production URL: **Still v1.5.1**. Development stuck. | Done |
+| **Fix** | Executed `git commit --allow-empty` to trigger a fresh SHA and force Vercel to rebuild. | Done |
+
+### 🧠 Note to Self (Critical Lesson)
+*   **Vercel Build Queue**: If a User says "It's still broken" and I pushed the fix, 99% of the time it is because the DEPLOYMENT FAILED or IS QUEUED.
+*   **Visual Check**: I cannot trust "It works locally". I must see the Version Badge change on the live URL.
+*   **Action**: I will not test multiplayer again until I see `v1.5.2` on the screen.

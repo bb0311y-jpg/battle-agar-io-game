@@ -38,7 +38,8 @@ export default function GamePage() {
 
   // Multiplayer Lobby State
   const [isReady, setIsReady] = useState(false);
-  // lobbyPlayers state removed (using otherPlayersRef)
+  // lobbyPlayers state removed (using otherPlayersRef) <-- OLD COMMENT
+  const [lobbyPlayers, setLobbyPlayers] = useState([]); // New State for UI
 
   const [isLoading, setIsLoading] = useState(true); // Mask initial lag
   const [loadingProgress, setLoadingProgress] = useState(0);
@@ -81,6 +82,10 @@ export default function GamePage() {
   const respawnTimerRef = useRef(0); // For 10s cooldown
   const hasDiedRef = useRef(false); // Track death state
   const savedScoreRef = useRef(0); // Store score before death
+
+  // New Ref for Heartbeat Lobby
+  const lobbyPlayersRef = useRef(new Map());
+  const lastHeartbeatRef = useRef(0);
 
   // Helper to switch state cleanly
   const switchGameState = (newState) => {
@@ -275,10 +280,18 @@ export default function GamePage() {
       }
 
       // Draw Players List (From Ref + Self)
-      const players = Array.from(otherPlayersRef.current.values());
-      players.push({ id: myId, name: nicknameRef.current || "Me", ready: isReadyRef.current });
+      // Use lobbyPlayersRef for consistency
+      const players = Array.from(lobbyPlayersRef.current.values());
+      // Self is not in lobbyPlayersRef usually, or handled? 
+      // Current implementation logic: we will add self to lobbyPlayersRef or just concat for display.
+      // Let's just concat self for display like before.
+      const displayList = [...players];
+      // Ensure I am in the list visually
+      if (!displayList.find(p => p.id === myId)) {
+        displayList.push({ id: myId, name: nicknameRef.current || "Me", ready: isReadyRef.current });
+      }
 
-      players.forEach((p, i) => {
+      displayList.forEach((p, i) => {
         ctx.fillStyle = p.ready ? '#00ff00' : '#ffff00';
         ctx.fillText(`${p.name} - ${p.ready ? 'READY' : 'WAITING'}`, canvas.width / 2, 200 + i * 40);
       });
@@ -448,12 +461,16 @@ export default function GamePage() {
     if (!isHost()) return; // Slaves do nothing, just wait for events
 
     // Must have > 1 player
-    if (otherPlayersRef.current.size >= 1 && isReadyRef.current) {
+    // Updated to use lobbyPlayersRef
+    const players = Array.from(lobbyPlayersRef.current.values());
+    // host is 1, plus clients. 
+    // lobbyPlayersRef contains clients (heartbeats from others).
+    // Total = clients + me.
+    const totalPlayers = players.length + 1;
+
+    if (totalPlayers >= 2 && isReadyRef.current) {
       // Check if ALL others are ready
-      let allOthersReady = true;
-      for (const p of otherPlayersRef.current.values()) {
-        if (!p.ready) { allOthersReady = false; break; }
-      }
+      const allOthersReady = players.every(p => p.ready);
 
       if (allOthersReady) {
         if (!isGameStartingRef.current) {
@@ -1205,13 +1222,16 @@ export default function GamePage() {
     botsRef.current = [];
     for (let i = 0; i < 20; i++) spawnBot();
 
-    // Track Presence
-    channelRef.current?.track({
-      id: myId,
-      name: name,
-      ready: false,
-      status: 'lobby',
-      updatedAt: Date.now()
+    // Track Presence -> REMOVED
+    // Initial Heartbeat
+    channelRef.current?.send({
+      type: 'broadcast', event: 'lobby_heartbeat',
+      payload: {
+        id: myId,
+        name: name,
+        ready: false,
+        timestamp: Date.now()
+      }
     });
   };
 
@@ -1219,22 +1239,17 @@ export default function GamePage() {
   const toggleReady = () => {
     const newState = !isReadyRef.current;
     setIsReadyWrapper(newState);
+
     if (gameModeRef.current === 'multi') {
-      const payload = {
-        id: myId,
-        name: nicknameRef.current || `Player ${myId.substr(0, 4)}`,
-        ready: newState,
-        status: 'lobby',
-        updatedAt: Date.now()
-      };
-
-      channelRef.current?.track(payload);
-
-      // Fallback Broadcast for Auth issues
       channelRef.current?.send({
         type: 'broadcast',
-        event: 'force_lobby_status',
-        payload: payload
+        event: 'lobby_heartbeat',
+        payload: {
+          id: myId,
+          name: nicknameRef.current || `Player ${myId.substr(0, 4)}`,
+          ready: newState,
+          timestamp: Date.now()
+        }
       });
     }
   };
@@ -1410,53 +1425,24 @@ export default function GamePage() {
           });
         }
       })
-      .on('presence', { event: 'sync' }, () => {
-        const state = channel.presenceState();
-        // Sync Presence State to otherPlayersRef
-        // State format: { "id": [ { id, name, ready, ... } ], ... }
+      .on('broadcast', { event: 'lobby_heartbeat' }, (payload) => {
+        if (gameModeRef.current !== 'multi') return;
+        // Allows updating lobby state even if 'playing' ? No, strictly lobby.
+        if (gameStateRef.current !== 'lobby') return;
 
-        const currentPlayers = otherPlayersRef.current;
-        const newPlayers = new Map();
-
-        for (const key in state) {
-          const entries = state[key];
-          if (!entries || entries.length === 0) continue;
-
-          // 1. Get best Server Data
-          const sorted = entries.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
-          const serverData = sorted[0];
-
-          if (!serverData) continue;
-          if (serverData.id === myId) continue; // Skip self
-
-          // 2. Check Local Cache (Smart Merge)
-          const localData = currentPlayers.get(serverData.id);
-
-          if (localData && (localData.updatedAt || 0) > (serverData.updatedAt || 0)) {
-            // Local is fresher, keep it.
-            newPlayers.set(serverData.id, localData);
-          } else {
-            // Server is newer.
-            newPlayers.set(serverData.id, { ...serverData, lastUpdate: Date.now() });
-          }
-        }
-
-        otherPlayersRef.current = newPlayers;
-        setDebugInfo(prev => ({ ...prev, players: newPlayers.size + 1 }));
-      })
-      // Backup Handler: If 'track' fails due to Auth, we allow manual broadcast of 'ready' state
-      // to update the local list. This is a hybrid approach for robustness.
-      .on('broadcast', { event: 'force_lobby_status' }, (payload) => {
-        // Payload: { id, name, ready }
-        const { id, name, ready, updatedAt } = payload.payload;
+        const { id, name, ready, timestamp } = payload.payload;
         if (id === myId) return;
 
-        const prev = otherPlayersRef.current.get(id) || {};
-        // Only update if newer
-        if ((updatedAt || 0) > (prev.updatedAt || 0)) {
-          otherPlayersRef.current.set(id, { ...prev, id, name, ready, updatedAt, lastUpdate: Date.now() });
-          setDebugInfo(prev => ({ ...prev, players: otherPlayersRef.current.size + 1 }));
-        }
+        lobbyPlayersRef.current.set(id, {
+          id,
+          name: name || 'Unknown',
+          ready,
+          lastSeen: Date.now()
+        });
+
+        // Update UI State
+        setLobbyPlayers(Array.from(lobbyPlayersRef.current.values()));
+        setDebugInfo(prev => ({ ...prev, players: lobbyPlayersRef.current.size + 1 }));
       })
       .on('broadcast', { event: 'player_death' }, (payload) => {
         if (gameModeRef.current === 'single') return; // Ignore in single player
@@ -1598,6 +1584,34 @@ export default function GamePage() {
 
           // Force UI update for lobby count
           setDebugInfo(prev => ({ ...prev, tick: (prev.tick || 0) + 1, players: otherPlayersRef.current.size + 1 }));
+
+          // HEARTBEAT LOGIC
+          if (time - lastHeartbeatRef.current > 1000) {
+            channelRef.current?.send({
+              type: 'broadcast',
+              event: 'lobby_heartbeat',
+              payload: {
+                id: myId,
+                name: nicknameRef.current || `Player ${myId.substr(0, 4)}`,
+                ready: isReadyRef.current,
+                timestamp: Date.now()
+              }
+            });
+            lastHeartbeatRef.current = time;
+
+            // Clean up timeouts
+            const now = Date.now();
+            let changed = false;
+            for (const [id, player] of lobbyPlayersRef.current.entries()) {
+              if (now - player.lastSeen > 3500) { // 3.5s timeout
+                lobbyPlayersRef.current.delete(id);
+                changed = true;
+              }
+            }
+            if (changed) {
+              setLobbyPlayers(Array.from(lobbyPlayersRef.current.values()));
+            }
+          }
         }
 
 
@@ -1814,7 +1828,7 @@ export default function GamePage() {
           position: 'absolute', bottom: '10%', left: '50%', transform: 'translateX(-50%)',
           textAlign: 'center'
         }}>
-          <h2 style={{ color: 'white', marginBottom: '20px' }}>Waiting for players... ({otherPlayersRef.current.size + 1} connected)</h2>
+          <h2 style={{ color: 'white', marginBottom: '20px' }}>Waiting for players... ({lobbyPlayers.length + 1} connected)</h2>
           <button
             onClick={toggleReady}
             style={{ ...btnStyle, background: isReady ? '#888' : '#0f0' }}
@@ -1822,6 +1836,16 @@ export default function GamePage() {
             {isReady ? 'CANCEL READY' : 'READY UP!'}
           </button>
           <div style={{ color: '#aaa', marginTop: '10px' }}>Needs at least 2 players to start</div>
+
+          <div style={{ marginTop: '20px', color: '#aaa' }}>
+            Players ({lobbyPlayers.length + 1}):
+            <div style={{ color: isReady ? '#0f0' : '#ff0' }}> You ({isReady ? 'READY' : 'WAITING'}) </div>
+            {lobbyPlayers.map(p => (
+              <div key={p.id} style={{ color: p.ready ? '#0f0' : '#ff0' }}>
+                {p.name} ({p.ready ? 'READY' : 'WAITING'})
+              </div>
+            ))}
+          </div>
 
           <div style={{ marginTop: '20px', padding: '10px', borderRadius: '5px', background: 'rgba(0,0,0,0.5)' }}>
             <span style={{ color: '#aaa', fontSize: '12px' }}>Network Status: </span>
