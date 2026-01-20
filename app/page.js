@@ -539,19 +539,43 @@ export default function GamePage() {
 
           if (lobbyTimerRef.current <= 0) {
             // START GAME!
-            // START GAME!
             // 1. Generate Seed
             const matchSeed = Math.floor(Math.random() * 2000000000);
 
-            // 2. Broadcast Seed (Lite Payload for Reliability)
+            // 2. Broadcast & Delay (Server-Like Authority)
             const startPayload = {
               type: 'broadcast', event: 'match_start',
               payload: { seed: matchSeed }
             };
-            channel.send(startPayload);
-            setTimeout(() => channel.send(startPayload), 300);
-            setTimeout(() => channel.send(startPayload), 600);
-            setTimeout(() => channel.send(startPayload), 1000);
+
+            const blast = () => {
+              if (gameStateRef.current !== 'lobby') return;
+              console.log("🚀 Broadcasting Start Signal...", matchSeed);
+              channel.send(startPayload);
+            };
+
+            // Blast for 2 seconds
+            blast();
+            [200, 400, 600, 800, 1000, 1500].forEach(t => setTimeout(blast, t));
+
+            // 3. Delayed Local Start
+            setTimeout(() => {
+              const rng = SeededRNG(matchSeed);
+              const initialFood = [];
+              for (let i = 0; i < FOOD_COUNT; i++) initialFood.push(createFood(false, rng));
+              const initialViruses = [];
+              for (let i = 0; i < VIRUS_COUNT; i++) initialViruses.push(createVirus(rng));
+              const initialBots = [];
+              for (let i = 0; i < 20; i++) initialBots.push(createBot(rng));
+
+              startHostGame(initialFood, initialViruses, initialBots);
+              isGameStartingRef.current = false;
+            }, 2000);
+
+            // Clear old immediate logic below (by not including it in replacement if I could, but I can't overwrite easily without matching)
+            // So I will just return here to skip the legacy code below, which I will delete in next step.
+            return;
+            /* LEGACY CODE BELOW TO BE REMOVED BY NEXT TOOL CALL OR IGNORED */
 
             // 3. Start Local (Deterministic)
             const rng = SeededRNG(matchSeed);
@@ -1938,8 +1962,8 @@ export default function GamePage() {
 
       {gameState === 'menu' && (
         <div style={overlayStyle}>
-          <h1 style={{ fontSize: '4rem', color: '#00ff00', textShadow: '0 0 20px #00ff00' }}>GLOW BATTLE v1.5.11</h1>
-          <div style={{ color: '#aaa', marginBottom: '20px' }}>Current Version: CRASH FIX (Ref Error Resolved)</div>
+          <h1 style={{ fontSize: '4rem', color: '#00ff00', textShadow: '0 0 20px #00ff00' }}>GLOW BATTLE v1.5.12</h1>
+          <div style={{ color: '#aaa', marginBottom: '20px' }}>Current Version: SERVER DELAY HOST (Reliable Start)</div>
           <input type="text" placeholder="Enter Nickname" value={nickname} onChange={e => setNicknameWrapper(e.target.value)}
             style={{ padding: '15px', fontSize: '1.5rem', borderRadius: '5px', border: 'none', textAlign: 'center', marginBottom: '20px' }} maxLength={10} />
 
