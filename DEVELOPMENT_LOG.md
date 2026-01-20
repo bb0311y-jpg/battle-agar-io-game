@@ -213,7 +213,28 @@ Recovered project state after folder deletion. Confirmed that local git history 
     *   **RLS/Policy**: Even if "Anon Sign-in" is on, maybe "Realtime" messages require specific RLS policies for `broadcast`? (Usually broadcast is public by default unless restricted).
     *   **Filter Logic**: Is my code `if (id === myId) return;` filtering out legitimate messages because of ID collisions? (Tested with cleared storage/Incognito, still failed).
 
+### 🔍 Root Cause Analysis (Resolved)
+1.  **Symptoms**:
+    *   Sender: `channel.send()` returns `ok`.
+    *   Receiver: `channel.on('broadcast', ...)` never fires for remote messages during the game init phase.
+    *   Result: Lobby stuck at "1 connected".
+2.  **Failed Attempts**:
+    *   Verified Supabase "Anonymous Sign-ins" (Necessary but not sufficient).
+    *   Switched to `Presence` (Unreliable/Slow).
+    *   Used `self: true` loopback (Proved generic connectivity, but didn't fix peer syncing).
+3.  **The Fix (v1.5.4)**:
+    *   **Relaxed Guard Clauses**: Removed strict `gameState === 'lobby'` and `gameMode === 'multi'` checks in the listener.
+    *   **Reason**: React state updates are asynchronous. When a packet arrives, the `ref.current` might not have updated yet (race condition), causing the client to silently "drop" valid heartbeats from peers. Removing the filter allowed the state to converge naturally.
+
+## Date: 2026-01-21 (Session 5 - Part 2) [In-Game Sync Issue]
+
+### 📝 New Issue
+*   **Report**: Lobby works, game starts, BUT **players cannot see each other in-game**.
+*   **Symptoms**: Map is empty, Leaderboard only shows self.
+*   **Hypothesis**: The same "Strict State Check" logic that broke the lobby is likely present in the `player_update` listener, causing game packets to be dropped. Or, the `channel` instance used in the Game Loop is outdated/different.
+
 ### 🚀 Next Steps
-1.  **Force "Public" Channel**: Try removing any RLS restrictions or verify Supabase Client is initialized with options that allow broadcast.
-2.  **Debug Receiver**: Add a "Catch-All" listener `channel.on('*', ...)` to see IF any traffic is hitting the client.
+1.  **Audit `player_update` Listener**: Apply the same "Relaxed Sync" logic (remove excessive guards).
+2.  **Check Game Loop Broadcaster**: Ensure it writes to the correct `global_room_v2` channel.
+
 
