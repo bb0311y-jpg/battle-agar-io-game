@@ -19,12 +19,13 @@
 - **目前已知**:
     - **Visibility**: 玩家彼此可見 (Fixed in v1.5.15).
     - **Infinite Reset Loop**: 發現 `checkLobbyStart` 會每幀觸發一次重置，導致遊戲無限重啟 (v1.5.20 已修復)。
+    - **Crash Fix**: 修復了 `ReferenceError: frameCount is not defined` 導致遊戲主迴圈中斷的問題 (v1.5.21)。
 
 ## ⏭️ 下一步計畫 (Next Steps)
-1.  **Verify**: 確認 Host 倒數計時正常 (終於！)。
+1.  **Verify**: 確認 Host 倒數計時正常。
 2.  **Phase 5**: 開始開發下注介面 (Betting UI)。
 
 ---
 
 ## 🤖 下一次循環啟動指令 (Startup Command for Next Cycle)
-> **請開啟瀏覽器並造訪 `https://battle-agar-io-game.vercel.app/`。目前版本為 v1.5.20。我找到了真正的元兇：Host 的啟動函式在倒數結束後，因為沒有被正確鎖定，導致「每秒鐘觸發 60 次遊戲重置」。這就是為什麼計時器永遠卡在 3:00 (因為它剛開始就被重置了)，也是為什麼 Bot 不動 (因為它們剛出生就被殺死了)。現在我加上了雙重鎖定。請驗證：1. 計時器是否開始倒數 2. Bot 是否移動。**
+> **請開啟瀏覽器並造訪 `https://battle-agar-io-game.vercel.app/`。目前版本為 v1.5.21。我在上一版修復重置迴圈時，不小心引入了一個變數錯誤 (`frameCount is not defined`) 導致遊戲崩潰。現在這個錯誤已經修復。結合 v1.5.20 的邏輯修復，這次遊戲應該能真正正常運行了。請驗證：1. 計時器是否開始倒數 2. Bot 是否移動。感謝您的耐心測試，這絕對是最後一關了。**
