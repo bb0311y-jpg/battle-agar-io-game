@@ -23,8 +23,16 @@ const INITIAL_SAFE_ZONE_RADIUS = Math.max(WORLD_WIDTH, WORLD_HEIGHT) / 1.5; // S
 
 // --- Global Utilities (Module Scope) to avoid Hoisting Issues ---
 const SeededRNG = (seed) => {
-  let s = seed % 2147483647;
+  // Robust check
+  let s = Number(seed);
+  if (isNaN(s) || s === 0) {
+    console.error("⚠️ Invalid Seed provided to SeededRNG:", seed);
+    s = 123456789; // Fallback
+  }
+
+  s = s % 2147483647;
   if (s <= 0) s += 2147483646;
+
   return () => {
     s = s * 16807 % 2147483647;
     return (s - 1) / 2147483646;
@@ -402,6 +410,7 @@ export default function GamePage() {
 
     [...botsRef.current, ...Array.from(otherPlayersRef.current.values()).flatMap(p => p.cells || []), ...myPlayerCellsRef.current].forEach(ent => {
       if (!ent) return;
+      if (isNaN(ent.x) || isNaN(ent.y) || isNaN(ent.radius) || ent.radius <= 0) return; // SKIP INVALID
 
       let drawX = ent.x;
       let drawY = ent.y;
@@ -2068,8 +2077,8 @@ export default function GamePage() {
 
       {gameState === 'menu' && (
         <div style={overlayStyle}>
-          <h1 style={{ fontSize: '4rem', color: '#00ff00', textShadow: '0 0 20px #00ff00' }}>GLOW BATTLE v1.5.16</h1>
-          <div style={{ color: '#aaa', marginBottom: '20px' }}>Current Version: HOST STABILITY (Fixed Bot/Time Sync)</div>
+          <h1 style={{ fontSize: '4rem', color: '#00ff00', textShadow: '0 0 20px #00ff00' }}>GLOW BATTLE v1.5.17</h1>
+          <div style={{ color: '#aaa', marginBottom: '20px' }}>Current Version: SEED FIX (Robust RNG + Crash Guard)</div>
           <input type="text" placeholder="Enter Nickname" value={nickname} onChange={e => setNicknameWrapper(e.target.value)}
             style={{ padding: '15px', fontSize: '1.5rem', borderRadius: '5px', border: 'none', textAlign: 'center', marginBottom: '20px' }} maxLength={10} />
 

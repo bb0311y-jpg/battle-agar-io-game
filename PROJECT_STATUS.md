@@ -18,13 +18,13 @@
 
 - **目前已知**:
     - **Visibility**: 玩家彼此可見 (Fixed in v1.5.15).
-    - **Host Stability**: 已修復 Host ID 浮動導致的計時器與 Bot 凍結問題 (v1.5.16)。
+    - **Crash Fix**: 修復了 Bad Seed 導致 Bot 渲染崩潰，進而凍結遊戲迴圈的問題 (v1.5.17)。
 
 ## ⏭️ 下一步計畫 (Next Steps)
-1.  **Verify**: 確認計時器 (Timer) 正常倒數，Bots 正常移動。
+1.  **Verify**: 確認遊戲流暢運行，不再卡頓或凍結。
 2.  **Phase 5**: 開始開發下注介面 (Betting UI)。
 
 ---
 
 ## 🤖 下一次循環啟動指令 (Startup Command for Next Cycle)
-> **請開啟瀏覽器並造訪 `https://battle-agar-io-game.vercel.app/`。目前版本為 v1.5.16。此次更新修復了因為 Host ID 變動導致的「計時器凍結」與「Bot 不移動」問題。請驗證：1. 遊戲倒數計時器是否正常運作 2. 場上的 Bot 是否會移動且雙方位置同步。確認無誤後即可進入 Phase 5 開發。**
+> **請開啟瀏覽器並造訪 `https://battle-agar-io-game.vercel.app/`。目前版本為 v1.5.17。此次更新修復了因為無效種子 (Bad Seed) 導致 Bot 渲染出錯並造成遊戲核心迴圈崩潰 (Game Loop Crash) 的問題。這應該能解決計時器凍結與 Bot 卡在角落的現象。請驗證：1. Bot 是否正常生成並移動 2. 計時器是否正常倒數。**
