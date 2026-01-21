@@ -19,7 +19,8 @@
 - **目前已知**:
     - **Visibility**: 玩家彼此可見 (Fixed in v1.5.15).
     - **Infinite Reset Loop**: 發現 `checkLobbyStart` 會每幀觸發一次重置，導致遊戲無限重啟 (v1.5.20 已修復)。
-    - **Crash Fix**: 修復了 `ReferenceError: frameCount is not defined` 導致遊戲主迴圈中斷的問題 (v1.5.21)。
+    - **Immediate Start**: 移除了 Host 啟動的 2秒延遲，並移除了可能導致變數衝突的已棄用代碼 (v1.5.22)。
+    - **Bot Color Bug**: 修復了 `createBot` 語法錯誤並確保顏色始終有效，解決灰色問號 Bot 問題 (v1.5.22)。
 
 ## ⏭️ 下一步計畫 (Next Steps)
 1.  **Verify**: 確認 Host 倒數計時正常。
@@ -28,4 +29,4 @@
 ---
 
 ## 🤖 下一次循環啟動指令 (Startup Command for Next Cycle)
-> **請開啟瀏覽器並造訪 `https://battle-agar-io-game.vercel.app/`。目前版本為 v1.5.21。我在上一版修復重置迴圈時，不小心引入了一個變數錯誤 (`frameCount is not defined`) 導致遊戲崩潰。現在這個錯誤已經修復。結合 v1.5.20 的邏輯修復，這次遊戲應該能真正正常運行了。請驗證：1. 計時器是否開始倒數 2. Bot 是否移動。感謝您的耐心測試，這絕對是最後一關了。**
+> **請開啟瀏覽器並造訪 `https://battle-agar-io-game.vercel.app/`。目前版本為 v1.5.22。我移除了 Host 的 2秒啟動延遲，並修復了 `createBot` 的語法錯誤 (這就是導致灰色問號 Bot 和顏色渲染問題的元兇)。請驗證：1. 計時器是否開始倒數 2. Bot 是否有顏色並開始移動 3. 殺死敵人後屍體是否消失。**

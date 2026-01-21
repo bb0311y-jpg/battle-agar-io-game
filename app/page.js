@@ -56,17 +56,20 @@ const createVirus = (rng = Math.random) => ({
   massBuf: 0
 });
 
-const createBot = (rng = Math.random) => ({
-  id: 'bot_' + Math.floor(rng() * 1000000),
-  x: rng() * WORLD_WIDTH,
-  y: rng() * WORLD_HEIGHT,
-  radius: 15 + rng() * 20,
-  color: '#888888',
-  targetX: rng() * WORLD_WIDTH,
-  targetY: rng() * WORLD_HEIGHT,
-  name: 'Bot',
-  changeDirTimer: 0
-});
+const createBot = (rng = Math.random) => {
+  const c = rng() * 360;
+  return {
+    id: 'bot_' + Math.floor(rng() * 1000000),
+    x: rng() * WORLD_WIDTH,
+    y: rng() * WORLD_HEIGHT,
+    radius: 15 + rng() * 20,
+    color: `hsl(${c}, 70%, 50%)`, // Always valid color
+    targetX: rng() * WORLD_WIDTH,
+    targetY: rng() * WORLD_HEIGHT,
+    name: 'Bot',
+    changeDirTimer: 0
+  };
+};
 
 export default function GamePage() {
   const canvasRef = useRef(null);
@@ -618,42 +621,23 @@ export default function GamePage() {
             blast();
             [200, 400, 600, 800, 1000, 1500].forEach(t => setTimeout(blast, t));
 
-            // 3. Delayed Local Start
-            setTimeout(() => {
-              const rng = SeededRNG(matchSeed);
-              const initialFood = [];
-              for (let i = 0; i < FOOD_COUNT; i++) initialFood.push(createFood(false, rng));
-              const initialViruses = [];
-              for (let i = 0; i < VIRUS_COUNT; i++) initialViruses.push(createVirus(rng));
-              const initialBots = [];
-              for (let i = 0; i < 20; i++) initialBots.push(createBot(rng));
+            // 3. IMMEDIATE Start (Sync is robust enough now)
+            const rng = SeededRNG(matchSeed);
+            const initialFood = [];
+            for (let i = 0; i < FOOD_COUNT; i++) initialFood.push(createFood(false, rng));
+            const initialViruses = [];
+            for (let i = 0; i < VIRUS_COUNT; i++) initialViruses.push(createVirus(rng));
+            const initialBots = [];
+            for (let i = 0; i < 20; i++) initialBots.push(createBot(rng));
 
-              startHostGame(initialFood, initialViruses, initialBots);
-              isGameStartingRef.current = false;
-            }, 2000);
+            console.log("🚀 Host Starting Game Immediately");
+            startHostGame(initialFood, initialViruses, initialBots);
+            isGameStartingRef.current = false;
 
             // Clear old immediate logic below (by not including it in replacement if I could, but I can't overwrite easily without matching)
             // So I will just return here to skip the legacy code below, which I will delete in next step.
             return;
-            /* LEGACY CODE BELOW TO BE REMOVED BY NEXT TOOL CALL OR IGNORED */
 
-            // 3. Start Local (Deterministic)
-            const rng = SeededRNG(matchSeed);
-
-            const initialFood = [];
-            for (let i = 0; i < FOOD_COUNT; i++) initialFood.push(createFood(false, rng));
-
-            const initialViruses = [];
-            for (let i = 0; i < VIRUS_COUNT; i++) initialViruses.push(createVirus(rng));
-
-            const initialBots = [];
-            for (let i = 0; i < 20; i++) initialBots.push(createBot(rng));
-
-            startHostGame(initialFood, initialViruses, initialBots);
-            isGameStartingRef.current = false;
-
-
-            isGameStartingRef.current = false;
           }
         }
       } else {
@@ -2100,8 +2084,8 @@ export default function GamePage() {
 
       {gameState === 'menu' && (
         <div style={overlayStyle}>
-          <h1 style={{ fontSize: '4rem', color: '#00ff00', textShadow: '0 0 20px #00ff00' }}>GLOW BATTLE v1.5.21</h1>
-          <div style={{ color: '#aaa', marginBottom: '20px' }}>Current Version: REFERENCE FIX (Restored FrameCount)</div>
+          <h1 style={{ fontSize: '4rem', color: '#00ff00', textShadow: '0 0 20px #00ff00' }}>GLOW BATTLE v1.5.22</h1>
+          <div style={{ color: '#aaa', marginBottom: '20px' }}>Current Version: SYNC FIX FINAL (Timer/Bots/Corpse)</div>
           <input type="text" placeholder="Enter Nickname" value={nickname} onChange={e => setNicknameWrapper(e.target.value)}
             style={{ padding: '15px', fontSize: '1.5rem', borderRadius: '5px', border: 'none', textAlign: 'center', marginBottom: '20px' }} maxLength={10} />
 
