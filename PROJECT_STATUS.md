@@ -17,13 +17,13 @@
     - **雙開測試**: 驗證 HostA 與 ClientB 均能正確進入遊戲、同步倒數、同步顯示排行榜。
 
 - **目前已知**:
-    - 多人同步已非常穩定，可應對網路抖動。
+    - **DEBUG MODE ENABLED**: 正在排查 In-Game Visibility Issue。已啟用畫面偵錯資訊與 console logs。
 
 ## ⏭️ 下一步計畫 (Next Steps)
-1.  **Phase 5**: 開始開發下注介面 (Betting UI)。
-2.  **Gameplay**: 調整縮圈速度與遊戲節奏。
+1.  **Debug**: 觀察畫面左下角偵錯資訊 (Connection, OtherP, Remote)。
+2.  **Verify**: 確認 Host 與 Client 的座標與 ID 是否正確同步。
 
 ---
 
 ## 🤖 下一次循環啟動指令 (Startup Command for Next Cycle)
-> **請開啟瀏覽器並造訪 `https://battle-agar-io-game.vercel.app/`。目前版本為 v1.5.13。多人連線同步已透過「狀態攜帶心跳 (Heartbeat Sync)」機制徹底修復，並經由雙開測試驗證 Host 與 Client 均能穩定進入遊戲且畫面同步。目前的進度是已完成多人連線核心優化 (Phase 4)，接下來請開始進行 Phase 5 下注系統 (Betting UI) 的開發。**
+> **請開啟瀏覽器並造訪 `https://battle-agar-io-game.vercel.app/`。目前版本為 v1.5.14 DEBUG。請執行雙人連線測試，並重點觀察雙方畫面左下角的「綠色偵錯控制台」。請回報：1. Connection 狀態 (SUBSCRIBED?) 2. 'OtherP' 的數量 3. 'Remote' 欄位是否不斷變化的 ID 與 Cell 數量。**

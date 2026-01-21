@@ -259,3 +259,16 @@ Recovered project state after folder deletion. Confirmed that local git history 
 *   **Lobby/Countdown/Game Start transitions are robust**.
 *   **Packet sizes are optimized** (Seed-based).
 *   **Crash on Host Start is resolved**.
+
+### 🛠️ Final Polish (v1.5.13 - v1.5.14)
+1.  **Status-Carrying Heartbeats (v1.5.13)**:
+    *   **Problem**: Even with triple handshake, some clients could miss `match_start` if network jitter was high.
+    *   **Fix**: Modified `lobby_heartbeat` to carry game state (`isStarting`, `seed`, `timer`). If a client sees a heartbeat with `isStarting=true` and a seed, it forces a local game start immediately. This acts as a robust fail-safe.
+2.  **Debug Instrumentation (v1.5.14)**:
+    *   **Issue**: User reported occasional visibility issues in production.
+    *   **Fix**: Added a comprehensive **On-Screen Debug Overlay** in the game canvas that shows:
+        *   Connection Status (SUBSCRIBED/Reconnecting)
+        *   Real-time Packet Counts (RX/TX)
+        *   Number of remote players detected by the client.
+        *   Raw data samples from Supabase channel.
+    *   Added logs to `animate` loop and `player_update` listener to trace packet flow.

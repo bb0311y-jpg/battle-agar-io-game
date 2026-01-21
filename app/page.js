@@ -127,6 +127,12 @@ export default function GamePage() {
   const lobbyPlayersRef = useRef(new Map());
   const lastHeartbeatRef = useRef(0);
   const matchSeedRef = useRef(null); // Seed for sync
+  const connectionStatusRef = useRef('CONNECTING');
+
+  // Sync ref with state
+  useEffect(() => {
+    connectionStatusRef.current = connectionStatus;
+  }, [connectionStatus]);
 
   // Helper to switch state cleanly
   const switchGameState = (newState) => {
@@ -479,6 +485,31 @@ export default function GamePage() {
       ctx.fillText("JACKPOT", 15, 5);
       ctx.restore();
     }
+
+    // DEBUG OVERLAY
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0); // Reset transform
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+    ctx.fillRect(10, canvas.height - 180, 300, 160);
+    ctx.fillStyle = 'lime';
+    ctx.font = '14px monospace';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+
+    let dy = canvas.height - 170;
+    const lh = 20;
+
+    ctx.fillText(`ID: ${myId.substr(0, 6)}`, 20, dy); dy += lh;
+    ctx.fillText(`Mode: ${gameModeRef.current} | GS: ${gameStateRef.current}`, 20, dy); dy += lh;
+    ctx.fillText(`Conn: ${connectionStatusRef.current}`, 20, dy); dy += lh;
+    ctx.fillText(`LobbyP: ${lobbyPlayersRef.current.size} | OtherP: ${otherPlayersRef.current.size}`, 20, dy); dy += lh;
+    ctx.fillText(`MyCells: ${myPlayerCellsRef.current.length} | Score: ${Math.round(scoreRef.current)}`, 20, dy); dy += lh;
+    ctx.fillText(`Frame: ${frameCount}`, 20, dy); dy += lh;
+
+    const pDetails = Array.from(otherPlayersRef.current.values()).map(p => `${p.id.substr(0, 4)}:${p.cells?.length || 0}`).join(', ');
+    ctx.fillText(`Remote: ${pDetails}`, 20, dy); dy += lh;
+
+    ctx.restore();
 
     ctx.restore();
   };
@@ -1465,6 +1496,7 @@ export default function GamePage() {
 
         const { id, cells, score, name } = payload.payload;
         if (id !== myId) {
+          if (Math.random() < 0.05) console.log("🎮 RX Sample:", id, cells?.length);
           // Debug First Packet from new ID
           if (!otherPlayersRef.current.has(id)) console.log("🎮 New In-Game Player Detected:", name, id);
           const prev = otherPlayersRef.current.get(id) || {};
@@ -1764,7 +1796,8 @@ export default function GamePage() {
         // Actually, just broadcast if we have cells and are in Multi mode.
         if (mode === 'multi' && myPlayerCellsRef.current.length > 0 && time - lastGameBroadcastTime > 50) {
           // Debug outgoing
-          // if (frameCount % 60 === 0) console.log("📤 Sending Game Update", { cells: myPlayerCellsRef.current.length });
+          // Debug outgoing
+          if (frameCount % 60 === 0) console.log("📤 Sending Game Update", { cells: myPlayerCellsRef.current.length, id: myId });
 
           channel.send({
             type: 'broadcast', event: 'player_update',
@@ -2008,8 +2041,8 @@ export default function GamePage() {
 
       {gameState === 'menu' && (
         <div style={overlayStyle}>
-          <h1 style={{ fontSize: '4rem', color: '#00ff00', textShadow: '0 0 20px #00ff00' }}>GLOW BATTLE v1.5.13</h1>
-          <div style={{ color: '#aaa', marginBottom: '20px' }}>Current Version: HEARTBEAT SYNC (State Carrier)</div>
+          <h1 style={{ fontSize: '4rem', color: '#00ff00', textShadow: '0 0 20px #00ff00' }}>GLOW BATTLE v1.5.14 DEBUG</h1>
+          <div style={{ color: '#aaa', marginBottom: '20px' }}>Current Version: DEBUG MODE (RX/TX Logs + Overlay)</div>
           <input type="text" placeholder="Enter Nickname" value={nickname} onChange={e => setNicknameWrapper(e.target.value)}
             style={{ padding: '15px', fontSize: '1.5rem', borderRadius: '5px', border: 'none', textAlign: 'center', marginBottom: '20px' }} maxLength={10} />
 
