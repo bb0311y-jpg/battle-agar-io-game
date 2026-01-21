@@ -500,7 +500,9 @@ export default function GamePage() {
     const lh = 20;
 
     ctx.fillText(`ID: ${myId.substr(0, 6)}`, 20, dy); dy += lh;
+    ctx.fillStyle = gameModeRef.current === 'single' ? 'red' : 'lime';
     ctx.fillText(`Mode: ${gameModeRef.current} | GS: ${gameStateRef.current}`, 20, dy); dy += lh;
+    ctx.fillStyle = 'lime';
     ctx.fillText(`Conn: ${connectionStatusRef.current}`, 20, dy); dy += lh;
     ctx.fillText(`LobbyP: ${lobbyPlayersRef.current.size} | OtherP: ${otherPlayersRef.current.size}`, 20, dy); dy += lh;
     ctx.fillText(`MyCells: ${myPlayerCellsRef.current.length} | Score: ${Math.round(scoreRef.current)}`, 20, dy); dy += lh;
@@ -1294,7 +1296,9 @@ export default function GamePage() {
       return;
     }
 
+    console.log("🔵 SWITCHING TO MULTIPLAYER MODE");
     setGameMode('multi');
+    gameModeRef.current = 'multi'; // Explicit force
     switchGameState('lobby');
     // lobbyPlayers cleared via effect logic usually, but here we just ensure refs clean if needed
     setIsReadyWrapper(false);
@@ -1491,8 +1495,8 @@ export default function GamePage() {
 
     channel
       .on('broadcast', { event: 'player_update' }, (payload) => {
-        // RELAXED SYNC: Commenting out strict mode check
-        // if (gameModeRef.current === 'single') return;
+        // RELAXED SYNC: Handle both Single (spectate/debug) and Multi
+        // if (gameModeRef.current === 'single') return; // Strict check removed
 
         const { id, cells, score, name } = payload.payload;
         if (id !== myId) {
