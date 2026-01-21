@@ -1647,6 +1647,15 @@ export default function GamePage() {
 
         const { seed, food, viruses, bots, hostId } = payload.payload;
 
+        // HOST LOOPBACK PROTECTION
+        // The Host manages its own start via checkLobbyStart/setTimeout.
+        // It must NOT process its own broadcast, otherwise it resets the game state repeatedly (Blasting),
+        // causing timer freeze and bot sync issues.
+        if (hostId === myId) {
+          console.log("🛡️ Ignoring Loopback Match Start (I am Host)");
+          return;
+        }
+
         if (hostId) {
           console.log("👑 Host ID Received:", hostId);
           hostIdRef.current = hostId;
@@ -2077,8 +2086,8 @@ export default function GamePage() {
 
       {gameState === 'menu' && (
         <div style={overlayStyle}>
-          <h1 style={{ fontSize: '4rem', color: '#00ff00', textShadow: '0 0 20px #00ff00' }}>GLOW BATTLE v1.5.17</h1>
-          <div style={{ color: '#aaa', marginBottom: '20px' }}>Current Version: SEED FIX (Robust RNG + Crash Guard)</div>
+          <h1 style={{ fontSize: '4rem', color: '#00ff00', textShadow: '0 0 20px #00ff00' }}>GLOW BATTLE v1.5.18</h1>
+          <div style={{ color: '#aaa', marginBottom: '20px' }}>Current Version: LOOPBACK FIX (Stopped Host Self-Reset)</div>
           <input type="text" placeholder="Enter Nickname" value={nickname} onChange={e => setNicknameWrapper(e.target.value)}
             style={{ padding: '15px', fontSize: '1.5rem', borderRadius: '5px', border: 'none', textAlign: 'center', marginBottom: '20px' }} maxLength={10} />
 
