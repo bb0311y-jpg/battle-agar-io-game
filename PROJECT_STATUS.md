@@ -17,13 +17,14 @@
     - **雙開測試**: 驗證 HostA 與 ClientB 均能正確進入遊戲、同步倒數、同步顯示排行榜。
 
 - **目前已知**:
-    - **DEBUG MODE ENABLED**: 正在排查 In-Game Visibility Issue。已啟用畫面偵錯資訊與 console logs。
+    - **Visibility**: 玩家彼此可見 (Fixed in v1.5.15).
+    - **Host Stability**: 已修復 Host ID 浮動導致的計時器與 Bot 凍結問題 (v1.5.16)。
 
 ## ⏭️ 下一步計畫 (Next Steps)
-1.  **Debug**: 觀察畫面左下角偵錯資訊 (Connection, OtherP, Remote)。
-2.  **Verify**: 確認 Host 與 Client 的座標與 ID 是否正確同步。
+1.  **Verify**: 確認計時器 (Timer) 正常倒數，Bots 正常移動。
+2.  **Phase 5**: 開始開發下注介面 (Betting UI)。
 
 ---
 
 ## 🤖 下一次循環啟動指令 (Startup Command for Next Cycle)
-> **請開啟瀏覽器並造訪 `https://battle-agar-io-game.vercel.app/`。目前版本為 v1.5.14 DEBUG。請執行雙人連線測試，並重點觀察雙方畫面左下角的「綠色偵錯控制台」。請回報：1. Connection 狀態 (SUBSCRIBED?) 2. 'OtherP' 的數量 3. 'Remote' 欄位是否不斷變化的 ID 與 Cell 數量。**
+> **請開啟瀏覽器並造訪 `https://battle-agar-io-game.vercel.app/`。目前版本為 v1.5.16。此次更新修復了因為 Host ID 變動導致的「計時器凍結」與「Bot 不移動」問題。請驗證：1. 遊戲倒數計時器是否正常運作 2. 場上的 Bot 是否會移動且雙方位置同步。確認無誤後即可進入 Phase 5 開發。**

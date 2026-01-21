@@ -127,6 +127,7 @@ export default function GamePage() {
   const lobbyPlayersRef = useRef(new Map());
   const lastHeartbeatRef = useRef(0);
   const matchSeedRef = useRef(null); // Seed for sync
+  const hostIdRef = useRef(null); // Explicit Host ID
   const connectionStatusRef = useRef('CONNECTING');
 
   // Sync ref with state
@@ -518,16 +519,23 @@ export default function GamePage() {
 
   // Helper: Am I the Host? (Lowest ID)
   // Helper: Am I the Host? (Lowest ID)
+  // Helper: Am I the Host? (Lowest ID)
   const isHost = () => {
+    // 1. If Game Started and we recorded a Host ID, use it (Sticky Host)
+    if (gameStateRef.current === 'playing' && hostIdRef.current) {
+      return myId === hostIdRef.current;
+    }
+
+    // 2. Fallback / Lobby Logic: Lowest ID is Host
     // In Lobby, use lobbyPlayersRef to decide host for starting game
     if (gameStateRef.current === 'lobby') {
       const allIds = [myId, ...Array.from(lobbyPlayersRef.current.keys())];
       allIds.sort();
       return allIds[0] === myId;
     }
-    // In Game, use otherPlayersRef (active players)
-    // RISK: If a player drops, host might shift. 
-    // Ideally host should be sticky, but Lowest ID is robust enough for now.
+
+    // In Game (Fallback if hostIdRef missing): use otherPlayersRef (active players)
+    // RISK: Flapping if players leave/join. But better than crash.
     const allIds = [myId, ...Array.from(otherPlayersRef.current.keys())];
     allIds.sort();
     return allIds[0] === myId;
@@ -578,9 +586,12 @@ export default function GamePage() {
             matchSeedRef.current = matchSeed;
 
             // 2. Broadcast & Delay (Server-Like Authority)
+            // SET MYSELF AS PERMANENT HOST for this match
+            hostIdRef.current = myId;
+
             const startPayload = {
               type: 'broadcast', event: 'match_start',
-              payload: { seed: matchSeed }
+              payload: { seed: matchSeed, hostId: myId }
             };
 
             const blast = () => {
@@ -816,10 +827,15 @@ export default function GamePage() {
   };
 
   const updateBots = (deltaTime, channel) => {
-    // Only Host runs AI
-    const amHost = isHost(); // Requires current closure access or passed arg? isHost uses refs, so it's fine.
-    // Wait, in Single player we are always host-like.
-    if (gameModeRef.current === 'multi' && !amHost) return;
+    // Only Host manages bots
+    // Clients just receive updates via 'bot_update'
+    const amHost = isHost();
+
+    // If I am NOT host, I should not simulate bots logic,
+    // I should simply interpolate them based on received data?
+    // Actually, 'botsRef' is shared. If I update it here AND receive updates, it flickers.
+    // Clients should SKIP this logic entirely if they are not host.
+    if (!amHost) return;
 
     // AI Logic ...
     const dt = deltaTime / 1000;
@@ -933,16 +949,18 @@ export default function GamePage() {
       otherPlayersRef.current.forEach((p, pid) => checkEatPlayer(pid, p.cells, false));
     }); // Close Bot Loop (forEach)
 
-    // Broadcast Updates (Frequency Throttling should be in loop, but we do naive here)
-    if (gameModeRef.current === 'multi' && amHost && Math.random() < 0.2) { // ~12fps broadcast
-      channel?.send({
-        type: 'broadcast', event: 'bot_update',
-        payload: botsRef.current.map(b => ({
-          id: b.id, x: Math.round(b.x), y: Math.round(b.y), radius: Math.round(b.radius), color: b.color
-        }))
-      });
+    // Broadcast Updates (Moved outside loop to send 1 packet per frame, not per bot)
+    if (gameModeRef.current === 'multi' && amHost) {
+      if (Math.random() < 0.5) { // 30fps update rate
+        channel?.send({
+          type: 'broadcast', event: 'bot_update',
+          payload: botsRef.current.map(b => ({
+            id: b.id, x: Math.round(b.x), y: Math.round(b.y), radius: Math.round(b.radius), color: b.color
+          }))
+        });
+      }
     }
-  }; // Close updateBots function
+  };
 
 
 
@@ -1618,7 +1636,12 @@ export default function GamePage() {
       .on('broadcast', { event: 'match_start' }, (payload) => {
         if (gameModeRef.current === 'single') return;
 
-        const { seed, food, viruses, bots } = payload.payload;
+        const { seed, food, viruses, bots, hostId } = payload.payload;
+
+        if (hostId) {
+          console.log("👑 Host ID Received:", hostId);
+          hostIdRef.current = hostId;
+        }
 
         if (seed !== undefined) {
           // V1.5.10+ Seeded Generation
@@ -2045,8 +2068,8 @@ export default function GamePage() {
 
       {gameState === 'menu' && (
         <div style={overlayStyle}>
-          <h1 style={{ fontSize: '4rem', color: '#00ff00', textShadow: '0 0 20px #00ff00' }}>GLOW BATTLE v1.5.15 DEBUG</h1>
-          <div style={{ color: '#aaa', marginBottom: '20px' }}>Current Version: MODE ENFORCEMENT (Red=Single, Lime=Multi)</div>
+          <h1 style={{ fontSize: '4rem', color: '#00ff00', textShadow: '0 0 20px #00ff00' }}>GLOW BATTLE v1.5.16</h1>
+          <div style={{ color: '#aaa', marginBottom: '20px' }}>Current Version: HOST STABILITY (Fixed Bot/Time Sync)</div>
           <input type="text" placeholder="Enter Nickname" value={nickname} onChange={e => setNicknameWrapper(e.target.value)}
             style={{ padding: '15px', fontSize: '1.5rem', borderRadius: '5px', border: 'none', textAlign: 'center', marginBottom: '20px' }} maxLength={10} />
 
