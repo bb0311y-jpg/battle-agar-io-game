@@ -2045,8 +2045,8 @@ export default function GamePage() {
 
       {gameState === 'menu' && (
         <div style={overlayStyle}>
-          <h1 style={{ fontSize: '4rem', color: '#00ff00', textShadow: '0 0 20px #00ff00' }}>GLOW BATTLE v1.5.14 DEBUG</h1>
-          <div style={{ color: '#aaa', marginBottom: '20px' }}>Current Version: DEBUG MODE (RX/TX Logs + Overlay)</div>
+          <h1 style={{ fontSize: '4rem', color: '#00ff00', textShadow: '0 0 20px #00ff00' }}>GLOW BATTLE v1.5.15 DEBUG</h1>
+          <div style={{ color: '#aaa', marginBottom: '20px' }}>Current Version: MODE ENFORCEMENT (Red=Single, Lime=Multi)</div>
           <input type="text" placeholder="Enter Nickname" value={nickname} onChange={e => setNicknameWrapper(e.target.value)}
             style={{ padding: '15px', fontSize: '1.5rem', borderRadius: '5px', border: 'none', textAlign: 'center', marginBottom: '20px' }} maxLength={10} />
 
