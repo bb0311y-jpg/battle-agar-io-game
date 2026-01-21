@@ -1561,6 +1561,13 @@ export default function GamePage() {
         const { isStarting, seed, timer: hostTimer } = payload.payload;
 
         if (isStarting && seed && gameStateRef.current === 'lobby') {
+          // V1.5.19 FIX: Host should NEVER be force-started by a client's heartbeat.
+          // Host is the authority. If I am Host, I ignore this.
+          if (isHost()) {
+            console.log("🛡️ Ignoring Force Start from Client (I am Host)");
+            return;
+          }
+
           console.log("🔥 DETECTED HOST STARTING via HEARTBEAT!", seed);
           if (!isGameStartingRef.current) {
             isGameStartingRef.current = true;
@@ -1896,6 +1903,8 @@ export default function GamePage() {
                 setTimeLeft(timeLeftRef.current);
                 // Broadcast
                 channel.send({ type: 'broadcast', event: 'match_time_update', payload: { time: timeLeftRef.current } });
+                // DEBUG TIMER
+                console.log("⏰ Host Tick:", timeLeftRef.current);
               } else {
                 // Client: Interpolate locally to prevent stutter
                 // We rely on 'match_time_update' to correct drift, but we MUST decrement locally
@@ -2086,8 +2095,8 @@ export default function GamePage() {
 
       {gameState === 'menu' && (
         <div style={overlayStyle}>
-          <h1 style={{ fontSize: '4rem', color: '#00ff00', textShadow: '0 0 20px #00ff00' }}>GLOW BATTLE v1.5.18</h1>
-          <div style={{ color: '#aaa', marginBottom: '20px' }}>Current Version: LOOPBACK FIX (Stopped Host Self-Reset)</div>
+          <h1 style={{ fontSize: '4rem', color: '#00ff00', textShadow: '0 0 20px #00ff00' }}>GLOW BATTLE v1.5.19</h1>
+          <div style={{ color: '#aaa', marginBottom: '20px' }}>Current Version: FEEDBACK FIX (Host ignores Client Echo)</div>
           <input type="text" placeholder="Enter Nickname" value={nickname} onChange={e => setNicknameWrapper(e.target.value)}
             style={{ padding: '15px', fontSize: '1.5rem', borderRadius: '5px', border: 'none', textAlign: 'center', marginBottom: '20px' }} maxLength={10} />
 
