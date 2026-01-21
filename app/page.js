@@ -589,6 +589,8 @@ export default function GamePage() {
           // Let's trust clients for countdown, but Host triggers the FINAL start.
 
           if (lobbyTimerRef.current <= 0) {
+            // STOP! DOUBLE ENTRY PROTECTION
+            lobbyTimerRef.current = 999999; // LOCK
             // START GAME!
             // 1. Generate Seed (Store in Ref for Heartbeat access)
             const matchSeed = Math.floor(Math.random() * 2000000000);
@@ -2095,8 +2097,8 @@ export default function GamePage() {
 
       {gameState === 'menu' && (
         <div style={overlayStyle}>
-          <h1 style={{ fontSize: '4rem', color: '#00ff00', textShadow: '0 0 20px #00ff00' }}>GLOW BATTLE v1.5.19</h1>
-          <div style={{ color: '#aaa', marginBottom: '20px' }}>Current Version: FEEDBACK FIX (Host ignores Client Echo)</div>
+          <h1 style={{ fontSize: '4rem', color: '#00ff00', textShadow: '0 0 20px #00ff00' }}>GLOW BATTLE v1.5.20</h1>
+          <div style={{ color: '#aaa', marginBottom: '20px' }}>Current Version: INFINITE LOOP FIX (Locked CheckLobbyStart)</div>
           <input type="text" placeholder="Enter Nickname" value={nickname} onChange={e => setNicknameWrapper(e.target.value)}
             style={{ padding: '15px', fontSize: '1.5rem', borderRadius: '5px', border: 'none', textAlign: 'center', marginBottom: '20px' }} maxLength={10} />
 
