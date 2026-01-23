@@ -1,5 +1,14 @@
 # DEVELOPMENT LOG
 
+## v2.21 - 2026-01-23
+### Phase 7c: Bug Fixes & Precision Control
+*   **[Fix]** Trail effect now shows for ALL cells when split (not just first cell).
+*   **[Fix]** Continuous input now sends mouseDist for consistent speed.
+*   **[Feature]** Mouse Distance Speed Control: Closer mouse = slower speed for precision aiming.
+    - 0-50px: 20% speed (precision mode)
+    - 50-150px: Scales 20-100%
+    - 150+px: Full speed
+
 ## v2.20 - 2026-01-23
 ### Phase 7b: Bug Fix & Final VFX
 *   **[Fix]** Mouse Stuck Bug - Player no longer stops when mouse stationary (continuous 50ms input).

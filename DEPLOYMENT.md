@@ -1,12 +1,16 @@
 # 部署指南 (Deployment Guide)
 
+## 🌐 正式站點
+
+**Frontend (Vercel):** https://battle-agar-io-game.vercel.app
+
 ## 架構概覽
 
 | 服務 | 用途 | URL |
 |------|------|-----|
 | **Vercel** | Frontend 託管 (Next.js) | https://vercel.com |
 | **Supabase** | 資料庫 & 後端服務 | https://supabase.com |
-| **GitHub** | 版本控制 | https://github.com |
+| **GitHub** | 版本控制 | https://github.com/bb0311y-jpg/battle-agar-io-game |
 
 ## 環境變數
 

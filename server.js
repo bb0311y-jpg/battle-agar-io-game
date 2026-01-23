@@ -209,9 +209,9 @@ class GameRoom {
         const p = this.players.get(socketId);
         if (!p) return;
 
-        // Input: { targetX, targetY }
+        // Input: { targetX, targetY, mouseDist }
         // DEBUG: Trace Input
-        if (Math.random() < 0.05) console.log(`[Input] ID:${socketId.substr(0, 4)} T:(${Math.floor(input.targetX)},${Math.floor(input.targetY)})`);
+        if (Math.random() < 0.05) console.log(`[Input] ID:${socketId.substr(0, 4)} T:(${Math.floor(input.targetX)},${Math.floor(input.targetY)}) Dist:${Math.floor(input.mouseDist || 0)}`);
 
         // Anti-NaN: Reject invalid coordinates
         if (!Number.isFinite(input.targetX) || !Number.isFinite(input.targetY)) {
@@ -219,9 +219,10 @@ class GameRoom {
             return;
         }
 
-        // Store Target for Tick Logic
+        // Store Target and Mouse Distance for Tick Logic (v2.21)
         p.targetX = input.targetX;
         p.targetY = input.targetY;
+        p.mouseDist = input.mouseDist || 100; // Default 100px if not provided
     }
 
     // Helper: Circle Collision (touching)
@@ -295,7 +296,22 @@ class GameRoom {
                     if (dist > 0) {
                         // Speed based on Mass (Standard Agar.io Formula: Speed = Base * Mass^-0.44?)
                         // Simplified: Base 5, slows down as mass grows.
-                        const speed = Math.max(2, 8 * Math.pow(cell.mass, -0.1)); // Adjusted curve
+                        const baseSpeed = Math.max(2, 8 * Math.pow(cell.mass, -0.1)); // Adjusted curve
+
+                        // Mouse Distance Speed Modifier (v2.21)
+                        // Closer mouse = slower speed for precision
+                        // mouseDist: 0-50px = 20% speed, 50-150px = scales 20-100%, 150+ = 100% speed
+                        const mouseDist = p.mouseDist || 100;
+                        let speedMultiplier = 1;
+                        if (mouseDist < 50) {
+                            speedMultiplier = 0.2; // Precision mode
+                        } else if (mouseDist < 150) {
+                            speedMultiplier = 0.2 + (mouseDist - 50) / 100 * 0.8; // Scale from 20% to 100%
+                        } else {
+                            speedMultiplier = 1; // Full speed
+                        }
+
+                        const speed = baseSpeed * speedMultiplier;
 
                         // 1. Controlled Movement (Mouse)
                         // This is the "Intention" to move

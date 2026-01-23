@@ -372,23 +372,30 @@ export default function GamePage() {
         }
       }
 
-      // --- Trail Effect (v2.20) ---
+      // --- Trail Effect (v2.21) - For ALL cells ---
       const trailPlayer = playersRef.current.find(p => p.id === myIdRef.current);
       if (trailPlayer && trailPlayer.cells && trailPlayer.cells.length > 0) {
-        const cell = trailPlayer.cells[0];
         const now = Date.now();
 
-        // Add current position to trail
-        trailRef.current.push({ x: cell.x, y: cell.y, color: trailPlayer.color, timestamp: now });
+        // Add current position of ALL cells to trail
+        trailPlayer.cells.forEach(cell => {
+          trailRef.current.push({
+            x: cell.x,
+            y: cell.y,
+            radius: cell.radius,
+            color: trailPlayer.color,
+            timestamp: now
+          });
+        });
 
         // Remove old trail points (older than 300ms)
         trailRef.current = trailRef.current.filter(t => now - t.timestamp < 300);
 
         // Draw trail (fading circles)
-        trailRef.current.forEach((t, i) => {
+        trailRef.current.forEach((t) => {
           const age = now - t.timestamp;
           const alpha = Math.max(0, 1 - age / 300) * 0.3;
-          const radius = (cell.radius || 20) * (1 - age / 600);
+          const radius = (t.radius || 20) * (1 - age / 600);
 
           ctx.beginPath();
           ctx.arc(t.x, t.y, Math.max(3, radius), 0, Math.PI * 2);
@@ -619,6 +626,9 @@ export default function GamePage() {
     const dx = e.clientX - canvas.width / 2;
     const dy = e.clientY - canvas.height / 2;
 
+    // Calculate screen distance for speed control (v2.21)
+    const screenDist = Math.sqrt(dx * dx + dy * dy);
+
     // Convert to World Delta
     const worldDx = dx / zoom;
     const worldDy = dy / zoom;
@@ -632,10 +642,11 @@ export default function GamePage() {
       return;
     }
 
-    socketRef.current.emit('input_update', { targetX, targetY });
+    // Send target position AND mouse distance (v2.21)
+    socketRef.current.emit('input_update', { targetX, targetY, mouseDist: screenDist });
 
     // Store for continuous sending (v2.20 bug fix)
-    lastTargetRef.current = { x: targetX, y: targetY };
+    lastTargetRef.current = { x: targetX, y: targetY, mouseDist: screenDist };
   };
 
   // Continuous Input Sending (v2.20) - Fix for player stuck when mouse doesn't move
@@ -644,9 +655,9 @@ export default function GamePage() {
 
     const inputInterval = setInterval(() => {
       if (socketRef.current && lastTargetRef.current) {
-        const { x, y } = lastTargetRef.current;
+        const { x, y, mouseDist } = lastTargetRef.current;
         if (Number.isFinite(x) && Number.isFinite(y)) {
-          socketRef.current.emit('input_update', { targetX: x, targetY: y });
+          socketRef.current.emit('input_update', { targetX: x, targetY: y, mouseDist: mouseDist || 100 });
         }
       }
     }, 50); // Send every 50ms (20Hz) even if mouse not moving
@@ -733,7 +744,7 @@ export default function GamePage() {
           background: 'rgba(0,0,0,0.8)', zIndex: 10
         }}>
           <h1 style={{ fontSize: '4rem', color: '#00ff00', textShadow: '0 0 20px #00ff00', fontFamily: 'Arial' }}>
-            GLOW BATTLE v2.20 (Bug Fix + Trail)
+            GLOW BATTLE v2.21 (Precision Control)
           </h1>
           <div style={{ color: connectionStatus === 'CONNECTED' ? '#0f0' : '#f00', marginBottom: 20 }}>
             Status: {connectionStatus}
