@@ -46,18 +46,49 @@ class GameRoom {
         }));
 
         // Init Bots
-        this.bots = Array.from({ length: 20 }, (_, i) => ({
-            id: `bot_${i}`, x: rnd(WORLD_WIDTH), y: rnd(WORLD_HEIGHT),
-            radius: 15 + rnd(20), color: '#888',
-            targetX: rnd(WORLD_WIDTH), targetY: rnd(WORLD_HEIGHT)
-        }));
+        this.bots = Array.from({ length: 20 }, (_, i) => {
+            const mass = 15 + rnd(20);
+            return {
+                id: `bot_${i}`, x: rnd(WORLD_WIDTH), y: rnd(WORLD_HEIGHT),
+                mass: mass,
+                radius: 10 + Math.sqrt(mass) * 5,
+                color: '#888',
+                targetX: rnd(WORLD_WIDTH), targetY: rnd(WORLD_HEIGHT)
+            };
+        });
 
-        // Init Viruses
-        this.viruses = Array.from({ length: 10 }, (_, i) => ({
-            id: `v_${i}`, x: rnd(WORLD_WIDTH), y: rnd(WORLD_HEIGHT),
-            id: `v_${i}`, x: rnd(WORLD_WIDTH), y: rnd(WORLD_HEIGHT),
-            radius: 50, color: '#33ff33', isVirus: true
-        }));
+        // Init Viruses (with mass property and minimum distance)
+        this.viruses = [];
+        for (let i = 0; i < 15; i++) {
+            let x, y, tooClose;
+            let attempts = 0;
+            do {
+                x = rnd(WORLD_WIDTH);
+                y = rnd(WORLD_HEIGHT);
+                tooClose = this.viruses.some(v => {
+                    const dx = v.x - x;
+                    const dy = v.y - y;
+                    return Math.sqrt(dx * dx + dy * dy) < 300; // Min 300px apart
+                });
+                attempts++;
+            } while (tooClose && attempts < 50);
+
+            const mass = 100 + rnd(35);
+            this.viruses.push({
+                id: `v_init_${i}`, x, y,
+                mass: mass,
+                radius: 10 + Math.sqrt(mass) * 5,
+                color: '#33ff33', isVirus: true
+            });
+        }
+
+        // Init Jackpot (guaranteed at start)
+        this.jackpot = {
+            id: 'jackpot_init', x: rnd(WORLD_WIDTH), y: rnd(WORLD_HEIGHT),
+            color: '#FFD700', radius: 25, isJackpot: true
+        };
+        this.food.push(this.jackpot);
+
         // Betting System (Phase 5)
         this.pot = 0;
         this.minBet = 100;
@@ -88,13 +119,15 @@ class GameRoom {
 
         // Init First Cell
         player.cells.push({
-            id: `${socket.id} _0`,
+            id: `${socket.id}_0`,
             x: player.x,
             y: player.y,
             mass: 20,
-            radius: 20,
+            radius: 10 + Math.sqrt(20) * 5,
             vx: 0,
             vy: 0,
+            impulseX: 0,
+            impulseY: 0,
             mergeTime: 0
         });
         player.viewX = player.x;
@@ -191,7 +224,7 @@ class GameRoom {
         p.targetY = input.targetY;
     }
 
-    // Helper: Circle Collision
+    // Helper: Circle Collision (touching)
     checkCollision(c1, c2) {
         const dx = c1.x - c2.x;
         const dy = c1.y - c2.y;
@@ -199,11 +232,19 @@ class GameRoom {
         return dist < c1.radius + c2.radius;
     }
 
+    // Helper: Eat Collision (10% overlap of smaller circle)
+    checkEatCollision(predator, prey) {
+        const dx = predator.x - prey.x;
+        const dy = predator.y - prey.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        const smallerRadius = Math.min(predator.radius, prey.radius);
+        const overlapRequired = smallerRadius * 0.2; // 10% area ≈ 20% radius overlap
+        return dist < predator.radius + prey.radius - overlapRequired;
+    }
 
-
-    // Helper: Can Eat? (Size difference 20%)
+    // Helper: Can Eat? (Simple: mass > opponent + 10% overlap)
     canEat(predator, prey) {
-        return predator.radius > prey.radius * 1.2 && this.checkCollision(predator, prey);
+        return predator.mass > prey.mass && this.checkEatCollision(predator, prey);
     }
 
     tick() {
@@ -228,11 +269,11 @@ class GameRoom {
                 const startMass = Math.max(20, p.score);
 
                 p.cells = [{
-                    id: `${p.id}_${now} `,
+                    id: `${p.id}_${now}`,
                     x: spawnX, y: spawnY,
                     mass: startMass,
                     radius: 10 + Math.sqrt(startMass) * 5,
-                    vx: 0, vy: 0, mergeTime: 0
+                    vx: 0, vy: 0, impulseX: 0, impulseY: 0, mergeTime: 0
                 }];
                 io.to(p.id).emit('respawn_info', { x: p.x, y: p.y }); // Optional: Notify client logic
             }
@@ -254,17 +295,33 @@ class GameRoom {
                     if (dist > 0) {
                         // Speed based on Mass (Standard Agar.io Formula: Speed = Base * Mass^-0.44?)
                         // Simplified: Base 5, slows down as mass grows.
-                        // cell.radius grows with mass.
                         const speed = Math.max(2, 8 * Math.pow(cell.mass, -0.1)); // Adjusted curve
 
-                        cell.vx = (dx / dist) * speed;
-                        cell.vy = (dy / dist) * speed;
+                        // 1. Controlled Movement (Mouse)
+                        // This is the "Intention" to move
+                        const moveVX = (dx / dist) * speed;
+                        const moveVY = (dy / dist) * speed;
 
-                        // DEBUG: Log first player's movement (Force)
-                        if (p.id === Array.from(this.players.keys())[0]) {
-                            console.log(`[Move Debug] ID:${p.id.substr(0, 4)} Cell:(${Math.floor(cell.x)},${Math.floor(cell.y)}) Target:(${Math.floor(p.targetX || 0)},${Math.floor(p.targetY || 0)}) d:(${Math.floor(dx)},${Math.floor(dy)}) v:(${cell.vx.toFixed(2)},${cell.vy.toFixed(2)})`);
-                        }
+                        cell.vx = moveVX;
+                        cell.vy = moveVY;
                     }
+                }
+
+                // 2. Impulse & Inertia Application
+                // Apply Impulse
+                cell.x += cell.impulseX || 0;
+                cell.y += cell.impulseY || 0;
+
+                // Decay Impulse (Friction)
+                // If impulse is small, kill it to save processing
+                if (cell.impulseX) cell.impulseX *= 0.9;
+                if (cell.impulseY) cell.impulseY *= 0.9;
+                if (Math.abs(cell.impulseX) < 0.1) cell.impulseX = 0;
+                if (Math.abs(cell.impulseY) < 0.1) cell.impulseY = 0;
+
+                // DEBUG: Log first player's movement
+                if (p.id === Array.from(this.players.keys())[0] && (Math.abs(cell.impulseX) > 1 || Math.abs(cell.impulseY) > 1)) {
+                    // console.log(`[Impulse] ${cell.impulseX.toFixed(2)}, ${cell.impulseY.toFixed(2)}`);
                 }
 
                 // Elastic Collision (Cell Separation)
@@ -283,8 +340,21 @@ class GameRoom {
                             cell.y += ddy * push * 0.5;
                         }
                     } else {
-                        // Merge Logic (If overlapping significantly)
-                        // deferred: Implement simple "can't merge yet" repulsion for now
+                        // Merge Logic (Recombine)
+                        // If center distance < radius sum * 0.5 (significant overlap)
+                        // And cell is larger or same (to prevent double merge, prioritize strict order)
+                        const dist = Math.sqrt(Math.pow(cell.x - other.x, 2) + Math.pow(cell.y - other.y, 2)); // Recalc dist just in case
+
+                        if (dist < (cell.radius + other.radius) * 0.5) {
+                            // Correct Merge Condition
+                            if (cell.mass >= other.mass) {
+                                cell.mass += other.mass;
+                                cell.radius = 10 + Math.sqrt(cell.mass) * 5;
+
+                                other.mass = 0; // Mark for removal (cleanup loop handles mass < 10)
+                                other.dead = true;
+                            }
+                        }
                     }
                 });
 
@@ -310,19 +380,42 @@ class GameRoom {
             }
         });
 
-        // 5. Safe Zone Logic (Cell based)
+        // 5. Natural Decay & Safe Zone Logic
         let safeZoneRadius = this.getSafeZoneRadius();
         this.players.forEach(p => {
             if (p.dead) return;
+
+            // Calculate total score for decay tier
+            const totalScore = p.cells.reduce((sum, c) => sum + c.mass, 0);
+
+            // Get decay rate based on score tier (per second)
+            let decayPerSec = 0;
+            if (totalScore <= 50) decayPerSec = 0;
+            else if (totalScore <= 100) decayPerSec = 0.2;
+            else if (totalScore <= 150) decayPerSec = 0.3;
+            else if (totalScore <= 200) decayPerSec = 0.5;
+            else if (totalScore <= 300) decayPerSec = 0.8;
+            else decayPerSec = 1.0;
+
+            // Convert to per-tick decay
+            const decayPerTick = decayPerSec / TICK_RATE;
+
             p.cells.forEach(cell => {
                 const dx = cell.x - WORLD_WIDTH / 2;
                 const dy = cell.y - WORLD_HEIGHT / 2;
                 const dist = Math.sqrt(dx * dx + dy * dy);
-                if (dist > safeZoneRadius) {
-                    cell.mass *= 0.99; // 1% decay
-                    cell.radius = 10 + Math.sqrt(cell.mass) * 5;
+                const outsideZone = dist > safeZoneRadius;
+
+                // Apply decay (10x if outside safe zone)
+                const multiplier = outsideZone ? 10 : 1;
+                const actualDecay = decayPerTick * multiplier;
+
+                if (actualDecay > 0) {
+                    cell.mass -= actualDecay;
+                    cell.radius = 10 + Math.sqrt(Math.max(0, cell.mass)) * 5;
                 }
             });
+
             // Cleanup tiny cells
             p.cells = p.cells.filter(c => c.mass > 10);
             if (p.cells.length === 0) {
@@ -380,32 +473,42 @@ class GameRoom {
             for (let vIdx = this.viruses.length - 1; vIdx >= 0; vIdx--) {
                 const v = this.viruses[vIdx];
                 if (this.checkCollision(v, f)) {
-                    // Virus eats bullet
-                    v.radius += 5; // Grow faster (Bullet mass ~10)
+                    // Virus eats bullet (+5 mass per bullet)
+                    v.mass += 5;
+                    v.radius = 10 + Math.sqrt(v.mass) * 5;
                     this.food.splice(i, 1);
 
-                    // Virus Evolution (Level 1-8)
-                    // Base Radius 100. Max 180? 
-                    // User said "8-level virus". "Max level (8) -> Explode into 3".
-                    if (v.radius > 180) {
-                        // EXPLODE
-                        this.viruses.splice(vIdx, 1); // Grid of old virus
+                    // Virus Evolution (Explode at 135 mass)
+                    if (v.mass >= 135) {
+                        const baseAngle = Math.atan2(f.vy, f.vx);
+                        const speed = 40;
 
-                        // Spawn 3 smaller viruses
-                        // "Opposite direction to bullet" - tough without bullet velocity ref (f.vx might be 0).
-                        // Let's just explode outwards.
-                        for (let k = 0; k < 3; k++) {
-                            const angle = (Math.PI * 2 / 3) * k;
-                            const speed = 10;
-                            // They need to be moving viruses? Or just static?
-                            // Let's make them static for now, spawned nearby.
+                        // Reset Original Virus to base
+                        v.mass = 100;
+                        v.radius = 10 + Math.sqrt(v.mass) * 5;
+
+                        // Spawn 3 Viruses at -15°, 0°, +15° angles
+                        const angleOffsets = [-15, 0, 15]; // degrees
+                        angleOffsets.forEach((offsetDeg, idx) => {
+                            const offsetRad = offsetDeg * (Math.PI / 180);
+                            const shotAngle = baseAngle + offsetRad;
+                            const newMass = 100 + rnd(15); // Random Level 1-4
+
                             this.viruses.push({
-                                id: `v_${Date.now()}_${k}`, x: v.x + Math.cos(angle) * 50, y: v.y + Math.sin(angle) * 50,
-                                radius: 60, color: '#33ff33', isVirus: true
+                                id: `v_${Date.now()}_${vIdx}_${idx}`,
+                                x: v.x + Math.cos(shotAngle) * (v.radius + 50),
+                                y: v.y + Math.sin(shotAngle) * (v.radius + 50),
+                                mass: newMass,
+                                radius: 10 + Math.sqrt(newMass) * 5,
+                                color: '#33ff33',
+                                isVirus: true,
+                                vx: Math.cos(shotAngle) * speed,
+                                vy: Math.sin(shotAngle) * speed,
+                                decay: 0.95
                             });
-                        }
+                        });
                     }
-                    return; // Bullet eaten, next food
+                    return;
                 }
             }
 
@@ -449,6 +552,66 @@ class GameRoom {
             });
         });
 
+        // Virus Physics & Collision
+        for (let vIdx = this.viruses.length - 1; vIdx >= 0; vIdx--) {
+            const v = this.viruses[vIdx];
+
+            // 1. Virus Physics (Movement)
+            if (v.vx || v.vy) {
+                v.x += v.vx;
+                v.y += v.vy;
+                v.vx *= v.decay || 0.9;
+                v.vy *= v.decay || 0.9;
+                if (Math.abs(v.vx) < 0.1 && Math.abs(v.vy) < 0.1) {
+                    v.vx = 0; v.vy = 0;
+                }
+                // Boundary Check
+                v.x = Math.max(0, Math.min(WORLD_WIDTH, v.x));
+                v.y = Math.max(0, Math.min(WORLD_HEIGHT, v.y));
+            }
+
+            this.players.forEach(p => {
+                if (p.dead) return;
+                // Create a copy of cells to iterate safely while modifying the original array
+                const currentCells = [...p.cells];
+                currentCells.forEach(cell => {
+                    // Rule: mass > virus.mass + 10% overlap
+                    if (cell.mass > v.mass && this.checkEatCollision(cell, v)) {
+                        // Explode Cell
+                        this.viruses.splice(vIdx, 1); // Remove Virus
+
+                        // Split Logic (Max 16 cells)
+                        const maxSplits = 16 - p.cells.length;
+                        if (maxSplits > 0) {
+                            const splits = Math.min(maxSplits, 6); // Split into up to 6 pieces
+                            const massPerPiece = cell.mass / (splits + 1);
+
+                            // Original Cell shrinks
+                            cell.mass = massPerPiece;
+                            cell.radius = 10 + Math.sqrt(cell.mass) * 5;
+
+                            // Create Split Cells
+                            for (let k = 0; k < splits; k++) {
+                                const angle = Math.random() * Math.PI * 2;
+                                const speed = 15 + Math.random() * 15;
+                                p.cells.push({
+                                    id: `${p.id}_split_${Date.now()}_${k}`,
+                                    x: cell.x, y: cell.y,
+                                    mass: massPerPiece,
+                                    radius: 10 + Math.sqrt(massPerPiece) * 5,
+                                    vx: 0, vy: 0,
+                                    impulseX: Math.cos(angle) * speed,
+                                    impulseY: Math.sin(angle) * speed,
+                                    mergeTime: Date.now() + 10000,
+                                    color: p.color
+                                });
+                            }
+                        }
+                    }
+                });
+            });
+        }
+
 
 
         // 4. Combat (PvP & Bot interaction Refactored for Cells)
@@ -468,17 +631,25 @@ class GameRoom {
 
                 if (c1.owner === c2.owner && c1.owner !== null) continue; // Same owner
 
-                // Eat Logic (Size > 1.2x)
-                if (c1.radius > c2.radius * 1.2 && this.checkCollision(c1, c2)) {
+                // Eat Logic: mass > opponent + 10% overlap
+                if (c1.mass > c2.mass && this.checkEatCollision(c1, c2)) {
                     // c1 eats c2
                     if (c2.isBot) {
                         // Respawn Bot
                         const bot = this.bots.find(b => b.id === c2.id);
                         if (bot) {
+                            const botMass = c2.mass;
                             bot.x = rnd(WORLD_WIDTH); bot.y = rnd(WORLD_HEIGHT);
-                            bot.radius = 15 + rnd(20);
-                            // Gain Mass (Approx)
-                            c1.owner ? (c1.owner.cells.find(c => c.id === c1.id).mass += bot.radius) : 0;
+                            bot.mass = 15 + rnd(20);
+                            bot.radius = 10 + Math.sqrt(bot.mass) * 5;
+
+                            if (c1.owner) {
+                                const predator = c1.owner.cells.find(c => c.id === c1.id);
+                                if (predator) {
+                                    predator.mass += botMass * 0.4; // Gain 40% of Bot Mass
+                                    predator.radius = 10 + Math.sqrt(predator.mass) * 5;
+                                }
+                            }
                         }
                     } else {
                         // Player Cell
@@ -486,13 +657,18 @@ class GameRoom {
                         const idx = p2.cells.findIndex(c => c.id === c2.id);
                         if (idx !== -1) {
                             // Add mass to c1
+                            let gain = 0;
+                            if (c2.isBot) gain = c2.mass * 0.4; // Can reach here? No, caught above.
+                            else gain = c2.mass * 0.6; // Gain 60% of Player Mass
+
                             if (c1.isBot) {
+                                // Bot eating player?
                                 const bot1 = this.bots.find(b => b.id === c1.id);
-                                if (bot1) bot1.radius += c2.radius * 0.5;
+                                if (bot1) bot1.radius += gain;
                             } else {
                                 const p1Cell = c1.owner.cells.find(c => c.id === c1.id);
                                 if (p1Cell) {
-                                    p1Cell.mass += c2.mass;
+                                    p1Cell.mass += gain;
                                     p1Cell.radius = 10 + Math.sqrt(p1Cell.mass) * 5;
                                 }
                             }
@@ -522,6 +698,21 @@ class GameRoom {
             this.timer = 0;
             return;
         }
+
+        // 6.5. Safety: Enforce Radius = Mass consistency
+        this.players.forEach(p => {
+            if (p.dead) return;
+            p.cells.forEach(c => {
+                c.radius = 10 + Math.sqrt(c.mass) * 5;
+            });
+            // Update main player radius (for camera) based on biggest cell or score?
+            // Score = total mass
+            // Let's keep p.radius for total size approx or biggest cell
+            if (p.cells.length > 0) {
+                const maxR = Math.max(...p.cells.map(c => c.radius));
+                p.radius = maxR;
+            }
+        });
 
         // 7. Broadcast
         const payload = {
@@ -562,9 +753,9 @@ class GameRoom {
         if (action.type === 'eject') { // W Key
             // Eject from ALL eligible cells
             p.cells.forEach(cell => {
-                if (cell.mass < 35) return; // Min mass to eject
+                if (cell.mass < 40) return; // Min mass to eject (prevents self-kill)
 
-                const loss = 10;
+                const loss = 5;
                 cell.mass -= loss;
                 cell.radius = 10 + Math.sqrt(cell.mass) * 5;
 
@@ -626,11 +817,12 @@ class GameRoom {
                     y: cell.y + vy * cell.radius,
                     mass: splitMass,
                     radius: 10 + Math.sqrt(splitMass) * 5,
-                    vx: vx * speed,
-                    vy: vy * speed,
-                    mergeTime: Date.now() + 30000 // 30s Merge Cooldown
+                    vx: 0, vy: 0,
+                    impulseX: vx * speed,
+                    impulseY: vy * speed,
+                    mergeTime: Date.now() + 10000 // 10s Merge Cooldown
                 });
-                cell.mergeTime = Date.now() + 30000;
+                cell.mergeTime = Date.now() + 10000;
             });
         }
     }

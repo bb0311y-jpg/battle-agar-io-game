@@ -12,6 +12,17 @@
 ## 📊 專案當前狀態 (Current Status)
 - **目前階段 (Phase)**: **HIGHLY STABLE** - 多人連線完美同步 (Heartbeat State Sync)
 - **最近完成 (Recently Completed)**:
+    - **v2.18 (VISUAL FX)**: 10%重疊吞噬、分數彈出效果、射擊門檻40分。
+    - **v2.17 (QA VERIFIED)**: 版本號統一修復。
+    - **v2.16 (NATURAL DECAY)**: 分級自然衰減，毒圈外 10 倍懲罰。
+    - **v2.15 (TRIPLE VIRUS)**: 病毒分裂噴出 3 個。
+    - **v2.14 (BUG FIX)**: 修復病毒分佈、Jackpot 生成。
+    - **v2.13 (SIMPLE RULES)**: 移除 1.01 倍門檻，分數大於對方即可吃掉。
+    - **v2.11 (MASS STANDARD)**: 全面分數化 (Mass-based)，定義 60%/40% 吞噬獎勵。
+    - **v2.10 (MERGE FIXED)**: 實作細胞融合、調整病毒射擊次數(20發)。
+    - **v2.09 (IMPULSE ENGINE)**: 物理引擎重構，修正分裂/炸裂的慣性問題。
+    - **v2.08 (VIRUS SHOOTER)**: 病毒射擊、1% 吞噬門檻、即時體型更新。
+    - **v2.07 (SMOOTH & VIRUS)**: 實作客戶端移動補間 (Interpolation) 與病毒碰撞分裂機制。
     - **v2.06 (PHYSICS FIX)**: 修正鏡頭座標同步異常，解決玩家單向暴衝問題。
     - **v2.05 (Pending)**: 下注系統暫緩，優先修復 Phase 4 異常。
     - **v2.04 (MULTI-CELL PHYSICS)**: 實作了 **Server-Side Multi-Cell Structure**，玩家現在由多個細胞組成。

@@ -29,7 +29,8 @@ export default function GamePage() {
   const [tokenBalance, setTokenBalance] = useState(1000); // Mock Balance
 
   // Game State Refs (Mutable for 60FPS rendering)
-  const playersRef = useRef([]);
+  const playersRef = useRef([]); // Visual State
+  const serverPlayersRef = useRef([]); // Server Target State
   const foodRef = useRef([]);
   const botsRef = useRef([]);
   const virusesRef = useRef([]); // v2.03 Phase 4.6
@@ -37,6 +38,20 @@ export default function GamePage() {
   const jackpotRef = useRef(null);
   const myIdRef = useRef(null);
   const cameraRef = useRef({ x: 2250, y: 2250, zoom: 1 }); // FIX: Start at Center
+
+  // Visual Effects System (v2.18)
+  const effectsRef = useRef([]); // Array of { type, x, y, text, color, startTime, duration }
+  const lastScoreRef = useRef(0); // Track last score for score popup
+
+  // Camera Shake & Death Effects (v2.19)
+  const cameraShakeRef = useRef({ intensity: 0, startTime: 0, duration: 0 });
+  const deathParticlesRef = useRef([]); // Array of { x, y, vx, vy, color, radius, startTime, duration }
+
+  // Continuous Input Fix (v2.20) - Store last target to send even when mouse doesn't move
+  const lastTargetRef = useRef({ x: 2250, y: 2250 });
+
+  // Trail Effect (v2.20) - Store previous positions
+  const trailRef = useRef([]); // Array of { x, y, color, timestamp }
 
   useEffect(() => {
     // 1. Connect to Server
@@ -63,7 +78,7 @@ export default function GamePage() {
     socket.on('game_update', (payload) => {
       // payload: { players, bots, food, time }
       // This is the High-Frequency Update (20-60Hz)
-      if (payload.players) playersRef.current = payload.players;
+      if (payload.players) serverPlayersRef.current = payload.players; // Store as Target, don't overwrite visual immediately
       if (payload.bots) botsRef.current = payload.bots; // Sync bots
       if (payload.viruses) virusesRef.current = payload.viruses; // Sync viruses
       if (payload.food) foodRef.current = payload.food; // Optional if dynamic
@@ -73,6 +88,34 @@ export default function GamePage() {
 
       // Phase 5: Sync Pot in Game
       if (payload.pot !== undefined) setPot(payload.pot);
+
+      // Visual Effects: Score Popup (v2.18)
+      const myPlayer = payload.players?.find(p => p.id === myIdRef.current);
+      if (myPlayer && myPlayer.score > lastScoreRef.current + 0.5) {
+        const gain = Math.floor(myPlayer.score - lastScoreRef.current);
+        if (gain > 0 && myPlayer.cells && myPlayer.cells.length > 0) {
+          const cell = myPlayer.cells[0];
+          effectsRef.current.push({
+            type: 'score_popup',
+            x: cell.x,
+            y: cell.y - cell.radius - 20,
+            text: `+${gain}`,
+            color: gain >= 10 ? '#FFD700' : '#00ff00',
+            startTime: Date.now(),
+            duration: 1000
+          });
+
+          // Camera Shake for big gains (v2.19)
+          if (gain >= 10) {
+            cameraShakeRef.current = {
+              intensity: Math.min(gain / 5, 10), // Max 10px shake
+              startTime: Date.now(),
+              duration: 200
+            };
+          }
+        }
+      }
+      if (myPlayer) lastScoreRef.current = myPlayer.score;
 
       if (payload.time !== undefined) setTimeLeft(Math.floor(payload.time));
       if (payload.leaderboard) {
@@ -137,6 +180,75 @@ export default function GamePage() {
     const render = () => {
       animationFrameId = requestAnimationFrame(render);
 
+      // --- INTERPOLATION (Smooth Movement) ---
+      const lerpFactor = 0.2; // Adjust for smoothness (0.1 = slow/smooth, 0.5 = fast/accurate)
+
+      const serverPlayers = serverPlayersRef.current;
+      const visualPlayers = playersRef.current;
+
+      // 1. Update Existing & Add New
+      serverPlayers.forEach(sp => {
+        let vp = visualPlayers.find(p => p.id === sp.id);
+        if (!vp) {
+          // New Player: Snap immediate
+          vp = JSON.parse(JSON.stringify(sp));
+          visualPlayers.push(vp);
+        } else {
+          // Existing: LERP properties
+          // If single cell, simple x/y lerp.
+          // If multi-cell, lerp each cell? 
+          // Simplified: Lerp the 'centroid' x/y for camera and labels
+          vp.x += (sp.x - vp.x) * lerpFactor;
+          vp.y += (sp.y - vp.y) * lerpFactor;
+          vp.score = sp.score; // Instant score update
+          vp.dead = sp.dead;
+          vp.color = sp.color;
+          vp.name = sp.name;
+          vp.name = sp.name;
+
+          // Fix: Immediate Radius Update if difference is large (e.g. eating bot)
+          // Otherwise smooth for small growth
+          const rDiff = sp.radius - vp.radius;
+          if (Math.abs(rDiff) > 5) {
+            vp.radius = sp.radius; // Snap for big changes
+          } else {
+            vp.radius += rDiff * lerpFactor; // Smooth for small
+          }
+
+          // Multi-Cell Lerp
+          if (sp.cells && sp.cells.length > 0) {
+            if (!vp.cells) vp.cells = JSON.parse(JSON.stringify(sp.cells));
+
+            // Sync Cells
+            sp.cells.forEach((sc, i) => {
+              let vc = vp.cells.find(c => c.id === sc.id);
+              if (!vc) {
+                vp.cells.push({ ...sc }); // New cell
+              } else {
+                vc.x += (sc.x - vc.x) * lerpFactor;
+                vc.y += (sc.y - vc.y) * lerpFactor;
+                vc.y += (sc.y - vc.y) * lerpFactor;
+
+                // Fix: Cell Radius Snap
+                const crDiff = sc.radius - vc.radius;
+                if (Math.abs(crDiff) > 5) {
+                  vc.radius = sc.radius;
+                } else {
+                  vc.radius += crDiff * lerpFactor;
+                }
+                vc.mass = sc.mass;
+              }
+            });
+            // Remove dead cells
+            vp.cells = vp.cells.filter(vc => sp.cells.find(sc => sc.id === vc.id));
+          }
+        }
+      });
+
+      // 2. Remove Disconnected Players
+      playersRef.current = visualPlayers.filter(vp => serverPlayers.find(sp => sp.id === vp.id));
+
+
       // 1. Camera Logic (Follow Me)
       const myPlayer = playersRef.current.find(p => p.id === myIdRef.current);
       if (myPlayer) {
@@ -171,8 +283,18 @@ export default function GamePage() {
       const camY = cameraRef.current.y;
       const zoom = cameraRef.current.zoom;
 
-      // Transform View
-      ctx.translate(canvas.width / 2, canvas.height / 2);
+      // Camera Shake Effect (v2.19)
+      let shakeX = 0, shakeY = 0;
+      const shake = cameraShakeRef.current;
+      if (shake.intensity > 0 && Date.now() - shake.startTime < shake.duration) {
+        const progress = (Date.now() - shake.startTime) / shake.duration;
+        const decay = 1 - progress; // Fade out
+        shakeX = (Math.random() - 0.5) * shake.intensity * decay;
+        shakeY = (Math.random() - 0.5) * shake.intensity * decay;
+      }
+
+      // Transform View (with shake)
+      ctx.translate(canvas.width / 2 + shakeX, canvas.height / 2 + shakeY);
       ctx.scale(zoom, zoom);
       ctx.translate(-camX, -camY);
 
@@ -250,6 +372,33 @@ export default function GamePage() {
         }
       }
 
+      // --- Trail Effect (v2.20) ---
+      const trailPlayer = playersRef.current.find(p => p.id === myIdRef.current);
+      if (trailPlayer && trailPlayer.cells && trailPlayer.cells.length > 0) {
+        const cell = trailPlayer.cells[0];
+        const now = Date.now();
+
+        // Add current position to trail
+        trailRef.current.push({ x: cell.x, y: cell.y, color: trailPlayer.color, timestamp: now });
+
+        // Remove old trail points (older than 300ms)
+        trailRef.current = trailRef.current.filter(t => now - t.timestamp < 300);
+
+        // Draw trail (fading circles)
+        trailRef.current.forEach((t, i) => {
+          const age = now - t.timestamp;
+          const alpha = Math.max(0, 1 - age / 300) * 0.3;
+          const radius = (cell.radius || 20) * (1 - age / 600);
+
+          ctx.beginPath();
+          ctx.arc(t.x, t.y, Math.max(3, radius), 0, Math.PI * 2);
+          ctx.fillStyle = t.color || '#00ff00';
+          ctx.globalAlpha = alpha;
+          ctx.fill();
+          ctx.globalAlpha = 1;
+        });
+      }
+
       // --- Draw Players (Multi-Cell) ---
       playersRef.current.forEach(p => {
         if (p.dead) return; // Don't draw dead players
@@ -288,7 +437,7 @@ export default function GamePage() {
         ctx.fillText(Math.floor(p.score), p.x, p.y + 12);
       });
 
-      // --- Draw Bots ---
+      // --- Draw Bots (with Score Display) ---
       botsRef.current.forEach(b => {
         ctx.beginPath();
         ctx.arc(b.x, b.y, b.radius, 0, Math.PI * 2);
@@ -297,10 +446,22 @@ export default function GamePage() {
         ctx.shadowBlur = 10;
         ctx.fill();
         ctx.shadowBlur = 0;
+
+        // Bot Score Display (v2.19)
+        ctx.fillStyle = '#fff';
+        ctx.font = 'bold 12px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText(Math.floor(b.mass || b.radius), b.x, b.y + 4);
       });
 
-      // --- Draw Viruses ---
+      // --- Draw Viruses (with Pulsating Glow) ---
+      const glowTime = Date.now() / 500; // Slow pulse
       virusesRef.current.forEach(v => {
+        // Pulsating glow effect (v2.19)
+        const glowIntensity = 15 + Math.sin(glowTime + v.x * 0.01) * 10;
+        ctx.shadowColor = '#33ff33';
+        ctx.shadowBlur = glowIntensity;
+
         ctx.beginPath();
         // Spiky Circle Logic
         const spikes = 20;
@@ -321,9 +482,67 @@ export default function GamePage() {
         ctx.strokeStyle = '#22aa22';
         ctx.lineWidth = 5;
         ctx.stroke();
+        ctx.shadowBlur = 0; // Reset glow
       });
 
       ctx.restore();
+
+      // --- Render Visual Effects (Score Popups) ---
+      const now = Date.now();
+      effectsRef.current = effectsRef.current.filter(effect => {
+        const elapsed = now - effect.startTime;
+        if (elapsed > effect.duration) return false; // Remove expired effects
+
+        const progress = elapsed / effect.duration;
+        const alpha = 1 - progress; // Fade out
+        const yOffset = progress * 30; // Float up
+
+        // Transform to screen coordinates
+        const screenX = (effect.x - camX) * zoom + canvas.width / 2;
+        const screenY = (effect.y - yOffset - camY) * zoom + canvas.height / 2;
+
+        ctx.save();
+        ctx.globalAlpha = alpha;
+        ctx.fillStyle = effect.color;
+        ctx.font = 'bold 20px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText(effect.text, screenX, screenY);
+        ctx.restore();
+
+        return true; // Keep effect
+      });
+
+      // --- Render Death Particles (v2.19) ---
+      deathParticlesRef.current = deathParticlesRef.current.filter(p => {
+        const elapsed = now - p.startTime;
+        if (elapsed > p.duration) return false;
+
+        const progress = elapsed / p.duration;
+        const alpha = 1 - progress;
+
+        // Update position
+        p.x += p.vx;
+        p.y += p.vy;
+        p.vx *= 0.95; // Friction
+        p.vy *= 0.95;
+
+        // Transform to screen
+        const screenX = (p.x - camX) * zoom + canvas.width / 2;
+        const screenY = (p.y - camY) * zoom + canvas.height / 2;
+        const screenRadius = p.radius * zoom * (1 - progress * 0.5);
+
+        ctx.save();
+        ctx.globalAlpha = alpha;
+        ctx.beginPath();
+        ctx.arc(screenX, screenY, Math.max(1, screenRadius), 0, Math.PI * 2);
+        ctx.fillStyle = p.color;
+        ctx.shadowColor = p.color;
+        ctx.shadowBlur = 5;
+        ctx.fill();
+        ctx.restore();
+
+        return true;
+      });
 
       // --- UI Overlay (Timer, Leaderboard) ---
       // Timer
@@ -414,7 +633,26 @@ export default function GamePage() {
     }
 
     socketRef.current.emit('input_update', { targetX, targetY });
+
+    // Store for continuous sending (v2.20 bug fix)
+    lastTargetRef.current = { x: targetX, y: targetY };
   };
+
+  // Continuous Input Sending (v2.20) - Fix for player stuck when mouse doesn't move
+  useEffect(() => {
+    if (gameState !== 'playing' || !socketRef.current) return;
+
+    const inputInterval = setInterval(() => {
+      if (socketRef.current && lastTargetRef.current) {
+        const { x, y } = lastTargetRef.current;
+        if (Number.isFinite(x) && Number.isFinite(y)) {
+          socketRef.current.emit('input_update', { targetX: x, targetY: y });
+        }
+      }
+    }, 50); // Send every 50ms (20Hz) even if mouse not moving
+
+    return () => clearInterval(inputInterval);
+  }, [gameState]);
 
   // Key Input
   useEffect(() => {
@@ -422,6 +660,10 @@ export default function GamePage() {
       if (e.key === 'w' || e.key === 'W') {
         if (gameState === 'playing' && !amIDead()) {
           socketRef.current.emit('input_action', { type: 'eject' });
+        }
+      } else if (e.code === 'Space') {
+        if (gameState === 'playing' && !amIDead()) {
+          socketRef.current.emit('input_action', { type: 'split' });
         }
       }
     };
@@ -491,7 +733,7 @@ export default function GamePage() {
           background: 'rgba(0,0,0,0.8)', zIndex: 10
         }}>
           <h1 style={{ fontSize: '4rem', color: '#00ff00', textShadow: '0 0 20px #00ff00', fontFamily: 'Arial' }}>
-            GLOW BATTLE v2.06 (Physics Fix)
+            GLOW BATTLE v2.20 (Bug Fix + Trail)
           </h1>
           <div style={{ color: connectionStatus === 'CONNECTED' ? '#0f0' : '#f00', marginBottom: 20 }}>
             Status: {connectionStatus}
@@ -519,7 +761,7 @@ export default function GamePage() {
           >
             JOIN SERVER
           </button>
-          <div style={{ marginTop: 20, color: '#666' }}>v2.06</div>
+          <div style={{ marginTop: 20, color: '#666' }}>v2.19</div>
         </div>
       )
       }
@@ -564,7 +806,7 @@ export default function GamePage() {
             >
               Ready / Start Game (Phase 4 Debug)
             </button>
-            <div style={{ marginTop: 20, color: '#666' }}>v2.06 (Physics Fix)</div>
+            <div style={{ marginTop: 20, color: '#666' }}>v2.20 (Bug Fix + Trail)</div>
           </div>
         )
       }
@@ -602,7 +844,7 @@ export default function GamePage() {
             >
               Back to Menu
             </button>
-            <div style={{ marginTop: 20, color: '#666' }}>v2.02</div>
+            <div style={{ marginTop: 20, color: '#666' }}>v2.20</div>
           </div>
         )
       }
