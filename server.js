@@ -27,11 +27,14 @@ class GameRoom {
     constructor(roomId) {
         this.roomId = roomId;
         this.players = new Map(); // socketId -> Player
+        this.spectators = new Map(); // socketId -> { id, joinTime }
+        this.spectatorUpdateInterval = null; // 20 FPS update for spectators
+        this.maxSpectators = 30; // Spectator limit
         this.bots = [];
         this.food = [];
         this.viruses = [];
         this.timer = 180; // 3 minutes
-        this.state = 'waiting'; // waiting, playing, gameover
+        this.state = 'waiting'; // waiting, countdown, playing, gameover
         this.interval = null;
         this.leaderboard = [];
         this.jackpot = null; // { x, y } or null
@@ -187,22 +190,128 @@ class GameRoom {
     }
 
     startGame() {
-        if (this.state === 'playing') return; // Prevent double start
-        console.log(`[${this.roomId}] Game Starting...`);
-        this.state = 'playing';
+        if (this.state === 'playing' || this.state === 'countdown') return; // Prevent double start
+        console.log(`[${this.roomId}] Starting Countdown...`);
+        this.state = 'countdown';
         this.timer = 180;
 
-        // Broadcast Start
-        io.to(this.roomId).emit('game_start', { time: this.timer });
+        // Send initial game state for preloading during countdown
+        io.to(this.roomId).emit('countdown_start', {
+            seconds: 3,
+            worldWidth: WORLD_WIDTH,
+            worldHeight: WORLD_HEIGHT,
+            food: this.food,
+            viruses: this.viruses,
+            bots: this.bots
+        });
 
-        if (this.interval) clearInterval(this.interval);
-        this.interval = setInterval(() => this.tick(), MS_PER_TICK);
+        let countdown = 3;
+        const countdownInterval = setInterval(() => {
+            countdown--;
+            io.to(this.roomId).emit('countdown_tick', { seconds: countdown });
+            console.log(`[${this.roomId}] Countdown: ${countdown}`);
+
+            if (countdown <= 0) {
+                clearInterval(countdownInterval);
+                this.state = 'playing';
+                console.log(`[${this.roomId}] Game Starting!`);
+
+                // Broadcast Start
+                io.to(this.roomId).emit('game_start', { time: this.timer });
+
+                if (this.interval) clearInterval(this.interval);
+                this.interval = setInterval(() => this.tick(), MS_PER_TICK);
+            }
+        }, 1000);
     }
 
     stopGame() {
         console.log(`[${this.roomId}] Game Stopping(No Players)`);
         this.state = 'waiting';
         if (this.interval) clearInterval(this.interval);
+        if (this.spectatorUpdateInterval) clearInterval(this.spectatorUpdateInterval);
+    }
+
+    // Spectator Management
+    addSpectator(socket) {
+        if (this.spectators.size >= this.maxSpectators) {
+            socket.emit('spectate_error', { message: '觀戰人數已達上限 (30人)' });
+            return false;
+        }
+
+        this.spectators.set(socket.id, {
+            id: socket.id,
+            joinTime: Date.now()
+        });
+        socket.join(this.roomId);
+
+        console.log(`[${this.roomId}] Spectator joined: ${socket.id} (Total: ${this.spectators.size})`);
+
+        // Send current game state immediately
+        socket.emit('spectate_init', {
+            worldWidth: WORLD_WIDTH,
+            worldHeight: WORLD_HEIGHT,
+            state: this.state,
+            food: this.food,
+            viruses: this.viruses,
+            bots: this.bots,
+            players: Array.from(this.players.values()),
+            safeZone: { x: WORLD_WIDTH / 2, y: WORLD_HEIGHT / 2, radius: this.getSafeZoneRadius() },
+            timer: this.timer
+        });
+
+        // Start spectator update loop if not already running
+        this.startSpectatorUpdates();
+        return true;
+    }
+
+    removeSpectator(socketId) {
+        this.spectators.delete(socketId);
+        console.log(`[${this.roomId}] Spectator left: ${socketId} (Total: ${this.spectators.size})`);
+
+        // Stop spectator updates if no spectators
+        if (this.spectators.size === 0 && this.spectatorUpdateInterval) {
+            clearInterval(this.spectatorUpdateInterval);
+            this.spectatorUpdateInterval = null;
+        }
+    }
+
+    startSpectatorUpdates() {
+        if (this.spectatorUpdateInterval) return; // Already running
+
+        // 20 FPS = 50ms interval
+        this.spectatorUpdateInterval = setInterval(() => {
+            if (this.spectators.size === 0 || this.state !== 'playing') return;
+
+            const payload = {
+                time: this.timer,
+                players: Array.from(this.players.values()),
+                bots: this.bots,
+                food: this.food,
+                viruses: this.viruses,
+                safeZone: { x: WORLD_WIDTH / 2, y: WORLD_HEIGHT / 2, radius: this.getSafeZoneRadius() },
+                leaderboard: this.generateLeaderboard(),
+                jackpot: this.jackpot
+            };
+
+            // Send to all spectators
+            this.spectators.forEach((_, socketId) => {
+                io.to(socketId).emit('spectator_update', payload);
+            });
+        }, 50); // 20 FPS
+    }
+
+    // Get room info for listing
+    getRoomInfo() {
+        return {
+            roomId: this.roomId,
+            state: this.state,
+            playerCount: this.players.size,
+            spectatorCount: this.spectators.size,
+            maxSpectators: this.maxSpectators,
+            timer: this.timer,
+            players: Array.from(this.players.values()).map(p => ({ name: p.name, score: Math.floor(p.score) }))
+        };
     }
 
     handleInput(socketId, input) {
@@ -885,10 +994,47 @@ io.on('connection', (socket) => {
         room.handleAction(socket.id, action);
     });
 
+    // Chat System
+    socket.on('chat_message', (message) => {
+        // Validate message
+        if (!message || typeof message !== 'string') return;
+        const trimmedMsg = message.trim();
+        if (trimmedMsg.length === 0 || trimmedMsg.length > 100) return;
+
+        const room = getRoom('default');
+        const player = room.players.get(socket.id);
+        const senderName = player?.name || 'Spectator';
+
+        console.log(`[Chat] ${senderName}: ${trimmedMsg}`);
+
+        // Broadcast to all in room (players + spectators)
+        io.to('default').emit('chat_broadcast', {
+            sender: senderName,
+            message: trimmedMsg,
+            timestamp: Date.now(),
+            senderId: socket.id
+        });
+    });
+
+    // Spectator Mode Events
+    socket.on('join_spectate', ({ roomId }) => {
+        const room = getRoom(roomId || 'default');
+        room.addSpectator(socket);
+    });
+
+    socket.on('get_room_list', () => {
+        const roomList = [];
+        rooms.forEach((room, roomId) => {
+            roomList.push(room.getRoomInfo());
+        });
+        socket.emit('room_list', roomList);
+    });
+
     socket.on('disconnect', () => {
         console.log('User disconnected:', socket.id);
         const room = getRoom('default');
         room.removePlayer(socket.id);
+        room.removeSpectator(socket.id); // Also remove from spectators
     });
 });
 

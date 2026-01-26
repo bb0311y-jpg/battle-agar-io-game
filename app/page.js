@@ -12,7 +12,7 @@ export default function GamePage() {
   const socketRef = useRef(null);
 
   // UI State
-  const [gameState, setGameState] = useState('menu'); // 'menu', 'playing'
+  const [gameState, setGameState] = useState('menu'); // 'menu', 'lobby', 'countdown', 'playing', 'spectating', 'gameover'
   const [nickname, setNickname] = useState('');
   const [connectionStatus, setConnectionStatus] = useState('DISCONNECTED');
   const [leaderboard, setLeaderboard] = useState([]);
@@ -20,6 +20,20 @@ export default function GamePage() {
   const [lobbyPlayers, setLobbyPlayers] = useState([]);
   const [winner, setWinner] = useState(null);
   const [finalLeaderboard, setFinalLeaderboard] = useState([]);
+  const [countdown, setCountdown] = useState(3); // Countdown seconds before game start
+
+  // Chat System State
+  const [chatMessages, setChatMessages] = useState([]); // Array of { sender, message, timestamp, senderId }
+  const [chatInput, setChatInput] = useState('');
+  const [isChatFocused, setIsChatFocused] = useState(false);
+
+  // Spectator Mode State
+  const [roomList, setRoomList] = useState([]); // Array of room info for spectator list
+
+  // Spectator Camera Refs (Mutable for loop access)
+  const spectatorCameraRef = useRef({ x: 2250, y: 2250, zoom: 0.3 });
+  const isDraggingRef = useRef(false);
+  const dragStartRef = useRef({ x: 0, y: 0 });
 
   // Phase 5: Betting State
   const [pot, setPot] = useState(0);
@@ -137,9 +151,74 @@ export default function GamePage() {
       setGameState('gameover');
     });
 
+    // Countdown events for preloading
+    socket.on('countdown_start', (data) => {
+      console.log('⏱️ Countdown Start:', data);
+      setCountdown(data.seconds);
+      setGameState('countdown');
+
+      // Preload game assets during countdown
+      if (data.food) foodRef.current = data.food;
+      if (data.viruses) virusesRef.current = data.viruses;
+      if (data.bots) botsRef.current = data.bots;
+    });
+
+    socket.on('countdown_tick', (data) => {
+      console.log('⏱️ Countdown:', data.seconds);
+      setCountdown(data.seconds);
+    });
+
     socket.on('game_start', () => {
+      console.log('🎮 Game Started!');
       setGameState('playing');
       setLobbyPlayers([]);
+    });
+
+    // Chat System
+    socket.on('chat_broadcast', (data) => {
+      console.log('💬 Chat:', data);
+      setChatMessages(prev => {
+        const newMessages = [...prev, data];
+        // Keep only last 10 messages
+        if (newMessages.length > 10) {
+          return newMessages.slice(-10);
+        }
+        return newMessages;
+      });
+    });
+
+    // Spectator Mode Events
+    socket.on('spectate_init', (data) => {
+      console.log('👁️ Spectate Init:', data);
+      setGameState('spectating');
+      if (data.food) foodRef.current = data.food;
+      if (data.viruses) virusesRef.current = data.viruses;
+      if (data.bots) botsRef.current = data.bots;
+      if (data.players) serverPlayersRef.current = data.players;
+      if (data.safeZone) safeZoneRef.current = data.safeZone;
+      if (data.timer) setTimeLeft(Math.floor(data.timer));
+    });
+
+    socket.on('spectator_update', (payload) => {
+      // Same as game_update but for spectators (20 FPS)
+      if (payload.players) serverPlayersRef.current = payload.players;
+      if (payload.bots) botsRef.current = payload.bots;
+      if (payload.viruses) virusesRef.current = payload.viruses;
+      if (payload.food) foodRef.current = payload.food;
+      if (payload.safeZone) safeZoneRef.current = payload.safeZone;
+      if (payload.time !== undefined) setTimeLeft(Math.floor(payload.time));
+      if (payload.leaderboard) setLeaderboard(payload.leaderboard);
+      jackpotRef.current = payload.jackpot || null;
+    });
+
+    socket.on('room_list', (rooms) => {
+      console.log('📋 Room List:', rooms);
+      setRoomList(rooms);
+    });
+
+    socket.on('spectate_error', (data) => {
+      console.error('❌ Spectate Error:', data.message);
+      alert(data.message);
     });
 
     // Cleanup
@@ -163,7 +242,8 @@ export default function GamePage() {
 
   // --- RENDERING LOOP ---
   useEffect(() => {
-    if (gameState !== 'playing') return;
+    // Render during 'countdown', 'playing', and 'spectating'
+    if (gameState !== 'playing' && gameState !== 'countdown' && gameState !== 'spectating') return;
 
     const canvas = canvasRef.current;
     const ctx = canvas.getContext('2d');
@@ -249,18 +329,29 @@ export default function GamePage() {
       playersRef.current = visualPlayers.filter(vp => serverPlayers.find(sp => sp.id === vp.id));
 
 
-      // 1. Camera Logic (Follow Me)
-      const myPlayer = playersRef.current.find(p => p.id === myIdRef.current);
-      if (myPlayer) {
-        // Smooth Lerp Camera
-        cameraRef.current.x += (myPlayer.x - cameraRef.current.x) * 0.1;
-        cameraRef.current.y += (myPlayer.y - cameraRef.current.y) * 0.1;
+      // 1. Camera Logic
+      if (gameState === 'playing') {
+        // Follow Me
+        const myPlayer = playersRef.current.find(p => p.id === myIdRef.current);
+        if (myPlayer) {
+          // Smooth Lerp Camera
+          cameraRef.current.x += (myPlayer.x - cameraRef.current.x) * 0.1;
+          cameraRef.current.y += (myPlayer.y - cameraRef.current.y) * 0.1;
 
-        // Zoom based on size (Simple)
-        const safeRadius = myPlayer.radius || 20; // Fallback to prevent NaN
-        const targetZoom = 1 / (1 + safeRadius / 1000);
-        cameraRef.current.zoom += (targetZoom - cameraRef.current.zoom) * 0.1;
+          // Zoom based on size (Simple)
+          const safeRadius = myPlayer.radius || 20; // Fallback to prevent NaN
+          const targetZoom = 1 / (1 + safeRadius / 1000);
+          cameraRef.current.zoom += (targetZoom - cameraRef.current.zoom) * 0.1;
+        }
+      } else if (gameState === 'spectating') {
+        // Free Camera (Spectator)
+        // Smoothly interp towards spectatorCamera state (which is updated by mouse events)
+        const target = spectatorCameraRef.current;
+        cameraRef.current.x += (target.x - cameraRef.current.x) * 0.2;
+        cameraRef.current.y += (target.y - cameraRef.current.y) * 0.2;
+        cameraRef.current.zoom += (target.zoom - cameraRef.current.zoom) * 0.2;
       }
+
 
       // Safety: Prevent Camera getting stuck at 0 or NaN (Defensive Fix)
       if (!Number.isFinite(cameraRef.current.x) || !Number.isFinite(cameraRef.current.y) ||
@@ -604,6 +695,22 @@ export default function GamePage() {
 
   // Input Handling
   const handleMouseMove = (e) => {
+    // Spectator Dragging
+    if (gameState === 'spectating' && isDraggingRef.current) {
+      const dx = e.clientX - dragStartRef.current.x;
+      const dy = e.clientY - dragStartRef.current.y;
+
+      const current = spectatorCameraRef.current;
+      spectatorCameraRef.current = {
+        ...current,
+        x: current.x - dx / current.zoom,
+        y: current.y - dy / current.zoom
+      };
+
+      dragStartRef.current = { x: e.clientX, y: e.clientY };
+      return;
+    }
+
     if (gameState !== 'playing' || !socketRef.current) return;
 
     // We need to send "Mouse Position in World"
@@ -668,6 +775,9 @@ export default function GamePage() {
   // Key Input
   useEffect(() => {
     const handleKeyDown = (e) => {
+      // Don't trigger game actions when typing in chat
+      if (isChatFocused) return;
+
       if (e.key === 'w' || e.key === 'W') {
         if (gameState === 'playing' && !amIDead()) {
           socketRef.current.emit('input_action', { type: 'eject' });
@@ -680,7 +790,23 @@ export default function GamePage() {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [gameState]);
+  }, [gameState, isChatFocused]);
+
+  // Poll Room List
+  useEffect(() => {
+    if (gameState !== 'menu' || !socketRef.current) return;
+
+    const fetchRooms = () => {
+      if (socketRef.current && socketRef.current.connected) {
+        socketRef.current.emit('get_room_list');
+      }
+    };
+
+    fetchRooms();
+    const interval = setInterval(fetchRooms, 3000); // 3 seconds
+
+    return () => clearInterval(interval);
+  }, [gameState, connectionStatus]);
 
   // Check if I am dead
   const amIDead = () => {
@@ -707,11 +833,41 @@ export default function GamePage() {
     return 0;
   };
 
+  // Spectator Input Handlers
+  const handleMouseDown = (e) => {
+    if (gameState === 'spectating') {
+      isDraggingRef.current = true;
+      dragStartRef.current = { x: e.clientX, y: e.clientY };
+    }
+  };
+
+  const handleMouseUp = () => {
+    isDraggingRef.current = false;
+  };
+
+  const handleWheel = (e) => {
+    if (gameState === 'spectating') {
+      const current = spectatorCameraRef.current;
+      const zoomSpeed = 0.001;
+      let newZoom = current.zoom - e.deltaY * zoomSpeed;
+
+      // Clamp zoom
+      newZoom = Math.max(0.1, Math.min(newZoom, 2.0));
+
+      spectatorCameraRef.current = { ...current, zoom: newZoom };
+    }
+  };
+
   return (
     <div style={{
       position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh',
       overflow: 'hidden', background: '#000', margin: 0, padding: 0
-    }} onMouseMove={handleMouseMove}>
+    }}
+      onMouseMove={handleMouseMove}
+      onMouseDown={handleMouseDown}
+      onMouseUp={handleMouseUp}
+      onWheel={handleWheel}
+    >
 
       {/* Toxic Overlay */}
       {gameState === 'playing' && (
@@ -723,6 +879,78 @@ export default function GamePage() {
           background: `rgba(255, 0, 0, ${getToxicOpacity()})`,
           transition: 'background 0.5s, box-shadow 0.5s'
         }} />
+      )}
+
+      {/* Chat System UI */}
+      {(gameState === 'playing' || gameState === 'spectating') && (
+        <div style={{
+          position: 'absolute',
+          bottom: '20px',
+          left: '20px',
+          width: '350px',
+          zIndex: 20,
+          fontFamily: 'Arial'
+        }}>
+          {/* Chat Messages */}
+          <div style={{
+            maxHeight: '200px',
+            overflowY: 'auto',
+            marginBottom: '10px',
+            padding: '10px',
+            background: 'rgba(0, 0, 0, 0.5)',
+            borderRadius: '8px'
+          }}>
+            {chatMessages.map((msg, idx) => {
+              const age = Date.now() - msg.timestamp;
+              const opacity = age > 4000 ? Math.max(0, 1 - (age - 4000) / 1000) : 1;
+              const isMe = msg.senderId === myIdRef.current;
+
+              return (
+                <div key={idx} style={{
+                  marginBottom: '5px',
+                  opacity: opacity,
+                  transition: 'opacity 0.5s'
+                }}>
+                  <span style={{
+                    color: isMe ? '#00ff00' : '#00aaff',
+                    fontWeight: 'bold'
+                  }}>
+                    {msg.sender}:
+                  </span>
+                  <span style={{ color: '#fff', marginLeft: '5px' }}>
+                    {msg.message}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Chat Input */}
+          <input
+            type="text"
+            value={chatInput}
+            onChange={(e) => setChatInput(e.target.value)}
+            onFocus={() => setIsChatFocused(true)}
+            onBlur={() => setIsChatFocused(false)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && chatInput.trim()) {
+                socketRef.current.emit('chat_message', chatInput);
+                setChatInput('');
+              }
+            }}
+            placeholder="按 Enter 發送訊息..."
+            style={{
+              width: '100%',
+              padding: '10px',
+              borderRadius: '5px',
+              border: '1px solid #444',
+              background: 'rgba(0, 0, 0, 0.7)',
+              color: '#fff',
+              outline: 'none',
+              boxSizing: 'border-box'
+            }}
+          />
+        </div>
       )}
 
       {gameState === 'playing' && amIDead() && (
@@ -772,7 +1000,44 @@ export default function GamePage() {
           >
             JOIN SERVER
           </button>
-          <div style={{ marginTop: 20, color: '#666' }}>v2.19</div>
+
+          {/* Room List for Spectators */}
+          <div style={{ marginTop: '30px', width: '400px', background: 'rgba(255, 255, 255, 0.1)', padding: '20px', borderRadius: '10px' }}>
+            <h3 style={{ color: '#fff', borderBottom: '1px solid #444', paddingBottom: '10px', textAlign: 'center' }}>
+              正在進行的遊戲 (觀戰)
+            </h3>
+            {roomList.length === 0 && <p style={{ color: '#888', textAlign: 'center' }}>暫無遊戲...</p>}
+            {roomList.map(room => (
+              <div key={room.roomId} style={{
+                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                padding: '10px', marginBottom: '5px', background: 'rgba(0,0,0,0.5)', borderRadius: '5px'
+              }}>
+                <div>
+                  <div style={{ color: '#0f0', fontWeight: 'bold' }}>Room {room.roomId}</div>
+                  <div style={{ fontSize: '12px', color: '#aaa' }}>
+                    👥 {room.playerCount} | 👁️ {room.spectatorCount}/{room.maxSpectators}
+                  </div>
+                  <div style={{ fontSize: '12px', color: '#aaa' }}>
+                    {room.state.toUpperCase()} | ⏱️ {Math.floor(room.timer)}s
+                  </div>
+                </div>
+                <button
+                  onClick={() => socketRef.current.emit('join_spectate', { roomId: room.roomId })}
+                  disabled={room.spectatorCount >= room.maxSpectators}
+                  style={{
+                    padding: '5px 15px',
+                    background: room.spectatorCount >= room.maxSpectators ? '#555' : '#00aaff',
+                    border: 'none', borderRadius: '5px',
+                    color: '#fff', cursor: room.spectatorCount >= room.maxSpectators ? 'not-allowed' : 'pointer'
+                  }}
+                >
+                  觀戰
+                </button>
+              </div>
+            ))}
+          </div>
+
+          <div style={{ marginTop: 20, color: '#666' }}>v2.23 (Spectator Mode)</div>
         </div>
       )
       }
@@ -815,9 +1080,42 @@ export default function GamePage() {
                 border: 'none', borderRadius: '5px', cursor: 'pointer', fontWeight: 'bold'
               }}
             >
-              Ready / Start Game (Phase 4 Debug)
+              Ready / Start Game
             </button>
-            <div style={{ marginTop: 20, color: '#666' }}>v2.20 (Bug Fix + Trail)</div>
+            <div style={{ marginTop: 20, color: '#666' }}>v2.22 (Loading Screen)</div>
+          </div>
+        )
+      }
+
+      {/* Countdown Screen with Background Preview */}
+      {
+        gameState === 'countdown' && (
+          <div style={{
+            position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+            display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+            background: 'rgba(0,0,0,0.7)', zIndex: 15, color: 'white', fontFamily: 'Arial'
+          }}>
+            <div style={{
+              fontSize: '12rem',
+              fontWeight: 'bold',
+              textShadow: '0 0 50px #00ff00, 0 0 100px #00ff00',
+              animation: 'pulse 1s ease-in-out infinite',
+              color: '#00ff00'
+            }}>
+              {countdown}
+            </div>
+            <p style={{ fontSize: '1.5rem', marginTop: '20px', color: '#888' }}>
+              遊戲即將開始...
+            </p>
+            <p style={{ fontSize: '1rem', color: '#555' }}>
+              Loading game assets...
+            </p>
+            <style>{`
+              @keyframes pulse {
+                0%, 100% { transform: scale(1); opacity: 1; }
+                50% { transform: scale(1.1); opacity: 0.8; }
+              }
+            `}</style>
           </div>
         )
       }
