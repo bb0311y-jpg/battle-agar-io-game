@@ -1030,6 +1030,13 @@ io.on('connection', (socket) => {
         socket.emit('room_list', roomList);
     });
 
+    socket.on('leave_game', () => {
+        const room = getRoom('default');
+        room.removePlayer(socket.id);
+        room.removeSpectator(socket.id);
+        console.log('User left game/spectate:', socket.id);
+    });
+
     socket.on('disconnect', () => {
         console.log('User disconnected:', socket.id);
         const room = getRoom('default');

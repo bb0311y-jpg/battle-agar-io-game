@@ -953,6 +953,34 @@ export default function GamePage() {
         </div>
       )}
 
+      {/* Spectator Exit Button */}
+      {gameState === 'spectating' && (
+        <button
+          onClick={() => {
+            socketRef.current.emit('leave_game');
+            setGameState('menu');
+            setChatMessages([]);
+            setRoomList([]); // Refresh list next time
+          }}
+          style={{
+            position: 'absolute',
+            top: '20px',
+            right: '20px', // Right side, avoiding chatbot if any, or maybe Top Left?
+            zIndex: 30,
+            padding: '10px 20px',
+            background: '#ff4444',
+            color: 'white',
+            border: 'none',
+            borderRadius: '5px',
+            cursor: 'pointer',
+            fontWeight: 'bold',
+            fontFamily: 'Arial'
+          }}
+        >
+          🚪 離開觀戰 (Exit)
+        </button>
+      )}
+
       {gameState === 'playing' && amIDead() && (
         <div style={{
           position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
