@@ -972,7 +972,7 @@ export default function GamePage() {
           background: 'rgba(0,0,0,0.8)', zIndex: 10
         }}>
           <h1 style={{ fontSize: '4rem', color: '#00ff00', textShadow: '0 0 20px #00ff00', fontFamily: 'Arial' }}>
-            GLOW BATTLE v2.21 (Precision Control)
+            GLOW BATTLE v2.23 (Spectator Mode)
           </h1>
           <div style={{ color: connectionStatus === 'CONNECTED' ? '#0f0' : '#f00', marginBottom: 20 }}>
             Status: {connectionStatus}
